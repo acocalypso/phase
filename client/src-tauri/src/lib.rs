@@ -1,10 +1,17 @@
+#[cfg(desktop)]
 use tauri::{Manager, WebviewWindowBuilder};
 
 mod audio_probe;
+mod host_platform;
 mod migration;
+mod mobile_compat;
+#[cfg(desktop)]
 mod native_bridge;
+#[cfg(desktop)]
 mod native_engine;
+mod native_engine_contract;
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK's dmabuf renderer renders blank frames when the GPU import
     // path misbehaves (NVIDIA drivers); forcing shared-memory buffers avoids
@@ -17,17 +24,20 @@ pub fn run() {
         std::env::set_var("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1");
     }
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default().plugin(tauri_plugin_shell::init());
+
+    #[cfg(desktop)]
+    let builder = builder
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             audio_probe::audio_boot_health,
+            host_platform::host_platform,
             migration::stash_legacy_storage,
             migration::set_channel_preference,
             migration::take_legacy_storage,
@@ -39,47 +49,74 @@ pub fn run() {
             native_bridge::connect_native_engine,
             native_bridge::native_engine_bridge_send,
             native_bridge::native_engine_bridge_close
-        ])
+        ]);
+
+    #[cfg(mobile)]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        audio_probe::audio_boot_health,
+        host_platform::host_platform,
+        migration::stash_legacy_storage,
+        migration::set_channel_preference,
+        migration::take_legacy_storage,
+        migration::confirm_legacy_import,
+        migration::mark_remote_load_ok,
+        mobile_compat::ensure_native_engine,
+        mobile_compat::native_engine_progress,
+        mobile_compat::stop_native_engine,
+        mobile_compat::connect_native_engine,
+        mobile_compat::native_engine_bridge_send,
+        mobile_compat::native_engine_bridge_close
+    ]);
+
+    let app = builder
         .setup(|app| {
-            // Kick off the audio-device probe before the webview exists so the
-            // verdict is usually cached by the time the page asks for it.
-            audio_probe::prewarm();
-            // `create: false` on the "main" window in tauri.conf.json defers
-            // window creation to here so we can pin an explicit, always-writable
-            // `data_directory` on Windows. WebView2 otherwise derives its
-            // user-data folder from the install path; on a read-only per-machine
-            // install (e.g. under Program Files) that folder can't be written, so
-            // WebView2 falls back to a throwaway profile that's discarded every
-            // launch and the Supabase session in localStorage never survives a
-            // restart even though `persistSession: true` is set. Pinning it to the
-            // per-user local-data dir keeps it stable and writable regardless of
-            // install location.
-            //
-            // Windows-only: WKWebView (macOS) ignores `data_directory`, and
-            // webkit2gtk (Linux) already persists under the user's profile by
-            // default — overriding it there would only relocate existing storage
-            // and force a one-time re-login, so we leave those platforms on their
-            // defaults and just build the window straight from config.
-            let main_config = &app.config().app.windows[0];
-            let builder =
-                WebviewWindowBuilder::from_config(app, main_config)?.on_navigation(|_| {
-                    native_engine::abort_native_engine_bridges_on_navigation();
-                    true
-                });
-            #[cfg(target_os = "windows")]
-            let builder = {
-                let data_dir = app.path().app_local_data_dir()?.join("webview");
-                builder.data_directory(data_dir)
-            };
-            builder.build()?;
+            #[cfg(desktop)]
+            {
+                // Kick off the audio-device probe before the webview exists so the
+                // verdict is usually cached by the time the page asks for it.
+                audio_probe::prewarm();
+                // `create: false` on the "main" window in tauri.conf.json defers
+                // window creation to here so we can pin an explicit, always-writable
+                // `data_directory` on Windows. WebView2 otherwise derives its
+                // user-data folder from the install path; on a read-only per-machine
+                // install (e.g. under Program Files) that folder can't be written, so
+                // WebView2 falls back to a throwaway profile that's discarded every
+                // launch and the Supabase session in localStorage never survives a
+                // restart even though `persistSession: true` is set. Pinning it to the
+                // per-user local-data dir keeps it stable and writable regardless of
+                // install location.
+                //
+                // Windows-only: WKWebView (macOS) ignores `data_directory`, and
+                // webkit2gtk (Linux) already persists under the user's profile by
+                // default — overriding it there would only relocate existing storage
+                // and force a one-time re-login, so we leave those platforms on their
+                // defaults and just build the window straight from config.
+                let main_config = &app.config().app.windows[0];
+                let builder =
+                    WebviewWindowBuilder::from_config(app, main_config)?.on_navigation(|_| {
+                        native_engine::abort_native_engine_bridges_on_navigation();
+                        true
+                    });
+                #[cfg(target_os = "windows")]
+                let builder = {
+                    let data_dir = app.path().app_local_data_dir()?.join("webview");
+                    builder.data_directory(data_dir)
+                };
+                builder.build()?;
+            }
+            #[cfg(mobile)]
+            let _ = app;
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while running phase.rs");
     app.run(|app, event| {
+        #[cfg(desktop)]
         if let tauri::RunEvent::Exit = event {
             native_engine::stop_native_engine_on_exit(app);
         }
+        #[cfg(mobile)]
+        let _ = (app, event);
     });
 }
 
@@ -106,6 +143,26 @@ mod tests {
         assert_eq!(
             windows[0]["create"], false,
             "must stay false so run()'s setup hook is the only window creator"
+        );
+    }
+
+    #[test]
+    fn android_overlay_creates_one_mobile_window_and_pins_bundle_settings() {
+        let raw = include_str!("../tauri.android.conf.json");
+        let config: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let windows = config["app"]["windows"].as_array().unwrap();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0]["label"], "main");
+        assert_eq!(windows[0]["create"], true);
+        assert_eq!(config["bundle"]["createUpdaterArtifacts"], false);
+        assert_eq!(config["bundle"]["android"]["minSdkVersion"], 24);
+        assert_eq!(
+            config["bundle"]["android"]["debugApplicationIdSuffix"],
+            ".debug"
+        );
+        assert_eq!(
+            config["bundle"]["android"]["autoIncrementVersionCode"],
+            false
         );
     }
 }

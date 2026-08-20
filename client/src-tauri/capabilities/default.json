@@ -5,14 +5,14 @@
     "windows": ["main"],
     "permissions": [
       "core:default",
-      "core:window:allow-set-fullscreen",
       "allow-stash-legacy-storage",
+      "allow-host-platform",
       "allow-audio-boot-health"
     ]
   },
   {
-    "identifier": "remote-shell",
-    "description": "Remote permissions for the first-party thin-shell content",
+    "identifier": "remote-shell-common",
+    "description": "Mobile-safe remote permissions for first-party thin-shell content",
     "local": false,
     "windows": ["main"],
     "remote": {
@@ -24,11 +24,8 @@
     },
     "permissions": [
       "core:default",
-      "core:window:allow-set-fullscreen",
       "shell:allow-open",
-      "process:allow-exit",
-      "process:allow-restart",
-      "updater:default",
+      "allow-host-platform",
       "allow-set-channel-preference",
       "allow-take-legacy-storage",
       "allow-confirm-legacy-import",
@@ -40,6 +37,26 @@
       "allow-native-engine-bridge-send",
       "allow-native-engine-bridge-close",
       "allow-audio-boot-health"
+    ]
+  },
+  {
+    "identifier": "remote-shell-desktop",
+    "description": "Desktop-only remote permissions for first-party thin-shell content",
+    "local": false,
+    "platforms": ["linux", "macOS", "windows"],
+    "windows": ["main"],
+    "remote": {
+      "urls": [
+        "https://phase-rs.dev/*",
+        "https://app.phase-rs.dev/*",
+        "https://preview.phase-rs.dev/*"
+      ]
+    },
+    "permissions": [
+      "core:window:allow-set-fullscreen",
+      "process:allow-exit",
+      "process:allow-restart",
+      "updater:default"
     ]
   }
 ]

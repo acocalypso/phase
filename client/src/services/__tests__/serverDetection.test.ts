@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const { desktopMock } = vi.hoisted(() => ({ desktopMock: vi.fn() }));
+vi.mock("../platform", () => ({ isDesktopTauri: desktopMock }));
 
 import {
   DEFAULT_MULTIPLAYER_SERVER_URL,
@@ -7,10 +10,40 @@ import {
 import {
   DEFAULT_SERVER,
   SERVER_PRESETS,
+  detectServerUrl,
   formatJoinShare,
   mixedContentBlockReason,
   parseJoinCode,
 } from "../serverDetection";
+import { useMultiplayerStore } from "../../stores/multiplayerStore";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+});
+
+describe("desktop sidecar detection", () => {
+  it("probes loopback first on desktop", async () => {
+    desktopMock.mockReturnValue(true);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await detectServerUrl()).toBe("ws://localhost:9374/ws");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:9374/health",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("never probes loopback on Android and starts with the stored server", async () => {
+    desktopMock.mockReturnValue(false);
+    useMultiplayerStore.setState({ serverAddress: "wss://stored.example/ws" });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await detectServerUrl()).toBe("wss://stored.example/ws");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe("https://stored.example/health");
+  });
+});
 
 describe("server defaults", () => {
   it("uses the configured build default as the first server preset", () => {

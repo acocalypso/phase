@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { isTauri } from "../../services/platform";
+import { isDesktopTauri, isMobileTauri } from "../../services/platform";
 
 function EnterFullscreenIcon({ className }: { className?: string }) {
   return (
@@ -28,7 +28,7 @@ export function FullscreenButton({ variant }: FullscreenButtonProps) {
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
 
   useEffect(() => {
-    if (isTauri()) {
+    if (isDesktopTauri()) {
       let active = true;
       let unlisten: (() => void) | undefined;
 
@@ -74,7 +74,7 @@ export function FullscreenButton({ variant }: FullscreenButtonProps) {
 
   const toggle = useCallback(async () => {
     try {
-      if (isTauri()) {
+      if (isDesktopTauri()) {
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         const appWindow = getCurrentWindow();
         const nextFullscreen = !(await appWindow.isFullscreen());
@@ -95,6 +95,8 @@ export function FullscreenButton({ variant }: FullscreenButtonProps) {
 
   const Icon = isFullscreen ? ExitFullscreenIcon : EnterFullscreenIcon;
   const label = isFullscreen ? t("fullscreen.exit") : t("fullscreen.enter");
+
+  if (isMobileTauri()) return null;
 
   if (variant === "game") {
     return (

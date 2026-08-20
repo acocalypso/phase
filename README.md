@@ -39,7 +39,7 @@
   <img src="docs/screenshot.webp" alt="phase.rs gameplay" width="900" />
 </p>
 
-A Rust-native MTG engine compiling to native and WASM, powering a Tauri desktop app, browser PWA, and WebSocket multiplayer. Implements comprehensive MTG rules using functional architecture — pure reducers, discriminated unions, and immutable state with structural sharing — with an Arena-quality React/TypeScript UI.
+A Rust-native MTG engine compiling to native and WASM, powering Tauri desktop and Android apps, a browser PWA, and WebSocket multiplayer. Implements comprehensive MTG rules using functional architecture — pure reducers, discriminated unions, and immutable state with structural sharing — with an Arena-quality React/TypeScript UI.
 
 ## Story
 
@@ -60,7 +60,7 @@ I'm not trying to make money off this. There are no ads. I'm just a dude who lik
 - **Multiplayer** — WebSocket server with hidden information, lobby system, and WebRTC peer-to-peer
 - **Metagame feeds** — Automated scraping of top decks from MTGGoldfish, updated daily
 - **Deck builder** — Card search, visual builder, and `.dck`/`.dec` import
-- **Cross-platform** — Tauri desktop (Windows, macOS, Linux), browser PWA, and tablet
+- **Cross-platform** — Tauri desktop (Windows, macOS, Linux), Android 7.0+, browser PWA, and tablet
 - **Card images** — Scryfall integration with IndexedDB caching
 
 ## Contribute a Card with Your LLM
@@ -127,6 +127,51 @@ If `tilt` is installed, `setup.sh` skips the eager WASM + card-data build and `t
 ./scripts/build-wasm.sh               # Build WASM bindings
 cd client && pnpm install && pnpm dev # Start frontend
 ```
+
+### Android APK
+
+Android development requires Java 17, Android SDK platform/build-tools 36, NDK
+`28.2.13676358`, and the Rust targets used by the two published ARM APKs:
+
+```bash
+rustup target add aarch64-linux-android armv7-linux-androideabi
+cd client
+corepack pnpm@9.15.9 install --frozen-lockfile
+node node_modules/@tauri-apps/cli/tauri.js android init --ci --skip-targets-install
+node node_modules/@tauri-apps/cli/tauri.js android build --debug --apk --target aarch64 --ci
+```
+
+The debug output is
+`client/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk`.
+It targets API 24+ and uses application ID `rs.phase.app.debug`, so it can be
+installed beside a release build. Install and capture a screenshot on the device
+(binary PNG data must not be redirected through the host shell):
+
+```text
+adb devices -l
+adb -s <serial> install -r -t client/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk
+adb -s <serial> shell am force-stop rs.phase.app.debug
+adb -s <serial> shell am start -W -n rs.phase.app.debug/rs.phase.app.MainActivity
+adb -s <serial> shell pidof rs.phase.app.debug
+adb -s <serial> shell dumpsys activity activities
+adb -s <serial> shell screencap -p /sdcard/phase.png
+adb -s <serial> pull /sdcard/phase.png <local-path>
+```
+
+To verify the shipped external-link path, dump the production UI with
+`adb -s <serial> shell uiautomator dump /sdcard/phase-window.xml`, pull it,
+locate the single enabled node whose `content-desc` is `GitHub`, tap the center
+of its bounds with `adb shell input tap`, and assert `dumpsys activity activities`
+contains the exact VIEW URI `https://github.com/phase-rs/phase` while Phase is
+not top-resumed. Record the Phase PID first, send
+`adb -s <serial> shell input keyevent KEYCODE_BACK`, then require
+`rs.phase.app.debug/rs.phase.app.MainActivity` to be top-resumed with the same PID.
+
+Shell releases attach signed `Phase-Android-arm64-v8a.apk` and
+`Phase-Android-armeabi-v7a.apk`. Release builds require all signing inputs and
+have no unsigned fallback. This project does not currently publish an AAB or a
+Google Play release; Android APKs are manual sideloads and do not consume the
+desktop `update.json` self-update manifest.
 
 ## Dedicated Server
 

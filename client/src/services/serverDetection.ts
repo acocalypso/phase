@@ -1,4 +1,4 @@
-import { isTauri } from "./platform";
+import { isDesktopTauri } from "./platform";
 import { useMultiplayerStore } from "../stores/multiplayerStore";
 import {
   DEFAULT_MULTIPLAYER_SERVER_URL,
@@ -66,7 +66,7 @@ export function isValidWebSocketUrl(value: string): boolean {
  */
 export async function detectServerUrl(): Promise<string> {
   // Step 1: If running in Tauri, check localhost sidecar
-  if (isTauri()) {
+  if (isDesktopTauri()) {
     const sidecarUrl = await tryHealthCheck(`http://localhost:${DEFAULT_PORT}/health`);
     if (sidecarUrl) {
       return `ws://localhost:${DEFAULT_PORT}/ws`;

@@ -12,7 +12,7 @@ import {
   useUpdateError,
   getUpdateDebugReport,
 } from "../../pwa/updateStatus";
-import { isBundledTauriOrigin, isTauri } from "../../services/platform";
+import { isBundledTauriOrigin, isDesktopTauri, isTauri } from "../../services/platform";
 
 const UPDATED_LABEL_MS = 4500;
 const didAutoUpdate = consumeRecentAutoUpdateMarker();
@@ -70,7 +70,7 @@ export function BuildBadge({ className = "", inline = false, compact = false }: 
   }, [isRemoteTauriShell]);
 
   const handleCheckUpdate = () => {
-    if (isTauri()) {
+    if (isDesktopTauri()) {
       checkForTauriUpdate();
       if (isBundledTauriOrigin()) return;
     }

@@ -120,6 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           jq empty client/src-tauri/tauri.conf.json
+          jq empty client/src-tauri/tauri.android.conf.json
           for f in client/src-tauri/capabilities/*.json; do
             jq empty "$f"
           done
@@ -166,6 +167,9 @@ jobs:
           - os: windows
             runner: windows-latest
             artifact: shell-tauri-windows
+          - os: android
+            runner: ubuntu-latest
+            artifact: shell-tauri-android
     steps:
       - uses: actions/checkout@v4
         with:
@@ -175,9 +179,26 @@ jobs:
         with:
           cache-shared-key: rust-shell-${{ matrix.os }}
 
+      - name: Install Android Rust targets
+        if: matrix.os == 'android'
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi
+
+      - uses: actions/setup-java@v4
+        if: matrix.os == 'android'
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+        if: matrix.os == 'android'
+
+      - name: Install pinned Android SDK and NDK
+        if: matrix.os == 'android'
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.9
 
       - uses: actions/setup-node@v4
         with:
@@ -231,7 +252,42 @@ jobs:
           sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install bootstrap dependencies
-        run: cd client && pnpm install --frozen-lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(pnpm --version)" = "9.15.9"
+          cd client
+          pnpm install --frozen-lockfile
+          sha256sum pnpm-lock.yaml | cut -d' ' -f1 > "$RUNNER_TEMP/pnpm-lock.before"
+
+      - name: Configure Android release signing
+        if: matrix.os == 'android'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_SIGNING_CERT_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD ANDROID_SIGNING_CERT_SHA256; do
+            test -n "${!name:-}" || { echo "::error::$name is required"; exit 1; }
+          done
+          echo "::add-mask::$ANDROID_KEY_ALIAS"
+          echo "::add-mask::$ANDROID_KEY_PASSWORD"
+          echo "::add-mask::$ANDROID_SIGNING_CERT_SHA256"
+          KEYSTORE="$RUNNER_TEMP/phase-android-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          keytool -list -v -keystore "$KEYSTORE" -alias "$ANDROID_KEY_ALIAS" \
+            -storepass "$ANDROID_KEY_PASSWORD" > "$RUNNER_TEMP/android-keytool.txt"
+          actual=$(sed -n 's/.*SHA256: //p' "$RUNNER_TEMP/android-keytool.txt" | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          expected=$(printf '%s' "$ANDROID_SIGNING_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          test -n "$actual" && test "$actual" = "$expected"
+          cat > client/src-tauri/gen/android/keystore.properties <<EOF
+          storeFile=$KEYSTORE
+          keyAlias=$ANDROID_KEY_ALIAS
+          password=$ANDROID_KEY_PASSWORD
+          EOF
 
       # Tauri selects its macOS signing path by the presence of these vars. Export
       # only non-empty secrets so an unavailable certificate keeps the ad-hoc path.
@@ -269,6 +325,7 @@ jobs:
           done
 
       - name: Build shell
+        if: matrix.os != 'android'
         uses: tauri-apps/tauri-action@v0
         env:
           # beforeBuildCommand runs only pnpm build:bootstrap. SHELL_REMOTE_ORIGIN
@@ -280,7 +337,15 @@ jobs:
         with:
           projectPath: client
 
+      - name: Build signed Android split APKs
+        if: matrix.os == 'android'
+        working-directory: client
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+        run: node node_modules/@tauri-apps/cli/tauri.js android build --apk --split-per-abi --target aarch64 --target armv7 --ci
+
       - name: Stage shell artifacts
+        if: matrix.os != 'android'
         shell: bash
         run: |
           set -euo pipefail
@@ -310,6 +375,48 @@ jobs:
           rename_artifact '*.AppImage' 'Phase-Desktop-Linux-x86_64.AppImage'
           rename_artifact '*.deb' 'Phase-Desktop-Linux-x86_64.deb'
           ls -la staging/
+
+      - name: Inspect and stage Android APKs
+        if: matrix.os == 'android'
+        shell: bash
+        env:
+          ANDROID_SIGNING_CERT_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          ARM64=client/src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk
+          ARM=client/src-tauri/gen/android/app/build/outputs/apk/arm/release/app-arm-release.apk
+          test -s "$ARM64" && test -s "$ARM"
+          test "$(sha256sum client/pnpm-lock.yaml | cut -d' ' -f1)" = "$(cat "$RUNNER_TEMP/pnpm-lock.before")"
+          expected_code=$(( $(cut -d. -f1 <<<"$SHELL_VERSION") * 1000000 + $(cut -d. -f2 <<<"$SHELL_VERSION") * 1000 + $(cut -d. -f3 <<<"$SHELL_VERSION") ))
+          expected_cert=$(printf '%s' "$ANDROID_SIGNING_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          inspect_apk() {
+            local apk="$1" abi="$2"
+            local badging="$RUNNER_TEMP/$(basename "$apk").badging"
+            "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | tee "$badging"
+            grep -q "package: name='rs.phase.app'" "$badging"
+            grep -q "versionCode='$expected_code'" "$badging"
+            grep -q "versionName='$SHELL_VERSION'" "$badging"
+            grep -q "sdkVersion:'24'" "$badging"
+            grep -q "targetSdkVersion:'36'" "$badging"
+            certs=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+            test "$(printf '%s\n' "$certs" | sed '/^$/d' | wc -l)" = 1
+            test "$(printf '%s' "$certs" | tr -d ':' | tr '[:upper:]' '[:lower:]')" = "$expected_cert"
+            zipinfo -1 "$apk" | grep -q "^lib/$abi/libphase_tauri_lib.so$"
+            test "$(zipinfo -1 "$apk" | grep '^lib/.*/libphase_tauri_lib.so$' | wc -l)" = 1
+          }
+          inspect_apk "$ARM64" arm64-v8a
+          inspect_apk "$ARM" armeabi-v7a
+          mkdir -p staging
+          cp "$ARM64" staging/Phase-Android-arm64-v8a.apk
+          cp "$ARM" staging/Phase-Android-armeabi-v7a.apk
+          test "$(find staging -maxdepth 1 -name '*.apk' | wc -l)" = 2
+
+      - name: Remove Android signing material
+        if: always() && matrix.os == 'android'
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/phase-android-release.jks"
+          rm -f client/src-tauri/gen/android/keystore.properties
 
       - name: Upload shell artifact
         uses: actions/upload-artifact@v4
@@ -382,17 +489,21 @@ jobs:
           echo "{\"version\":\"${SHELL_VERSION}\",\"notes\":\"Shell release ${TAG}\",\"pub_date\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"platforms\":${PLATFORMS}}" \
             | jq . > artifacts/update.json
           test -s artifacts/update.json
+          test "$(jq '.platforms | keys | length' artifacts/update.json)" = 3
+          test "$(jq -r '.platforms | has("android")' artifacts/update.json)" = false
+          test -s artifacts/shell-tauri-android/Phase-Android-arm64-v8a.apk
+          test -s artifacts/shell-tauri-android/Phase-Android-armeabi-v7a.apk
 
       - name: Create shell release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.SHELL_TAG }}
-          name: phase.rs Desktop v${{ env.SHELL_VERSION }}
+          name: phase.rs Shell v${{ env.SHELL_VERSION }}
           # The installer is the only thing a human comes to /releases for, so
           # it holds the "Latest" badge; web releases opt out (release.yml).
           make_latest: "true"
           body: |
-            ## Install phase.rs Desktop
+            ## Install phase.rs
 
             Download the installer for your platform:
 
@@ -400,7 +511,15 @@ jobs:
             - **macOS (Apple Silicon):** `Phase-Desktop-macOS-Apple-Silicon.dmg`
             - **Linux:** `Phase-Desktop-Linux-x86_64.deb` or `Phase-Desktop-Linux-x86_64.AppImage`
 
-            This is the official desktop app for [phase-rs.dev](https://phase-rs.dev).
+            ## Android (manual sideload)
+
+            - **64-bit ARM:** `Phase-Android-arm64-v8a.apk`
+            - **32-bit ARM:** `Phase-Android-armeabi-v7a.apk`
+
+            Android APKs are signed release assets for manual sideloading. They are not
+            published to Google Play and do not use the desktop `update.json` updater.
+
+            These are the official shell apps for [phase-rs.dev](https://phase-rs.dev).
             `update.json` is used by automatic updates; it is not a manual download.
           fail_on_unmatched_files: true
           files: |
@@ -409,4 +528,6 @@ jobs:
             artifacts/shell-tauri-macos/Phase-Desktop-macOS-Apple-Silicon.dmg
             artifacts/shell-tauri-macos/Phase-Desktop-macOS-Apple-Silicon.app.tar.gz
             artifacts/shell-tauri-windows/Phase-Desktop-Windows-x64-Setup.exe
+            artifacts/shell-tauri-android/Phase-Android-arm64-v8a.apk
+            artifacts/shell-tauri-android/Phase-Android-armeabi-v7a.apk
             artifacts/update.json

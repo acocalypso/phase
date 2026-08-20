@@ -668,6 +668,9 @@ jobs:
           mkdir -p client/bootstrap/dist
           echo '<!doctype html><html></html>' > client/bootstrap/dist/index.html
 
+      - name: Tauri standalone tests
+        run: cargo test --locked --manifest-path client/src-tauri/Cargo.toml
+
       - name: Tauri compile check
         # phase-tauri is excluded from the workspace clippy and nextest runs
         # above (no proptest support, no tests). Without this step, compile
@@ -676,6 +679,73 @@ jobs:
         # Driven via --manifest-path because client/src-tauri is excluded
         # from the root workspace, so `-p phase-tauri` cannot resolve it.
         run: cargo check --locked --manifest-path client/src-tauri/Cargo.toml
+
+  tauri-android-check:
+    name: Tauri Android debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install pinned Android SDK and NDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: aarch64-linux-android
+          cache-shared-key: rust-tauri-android
+          cache-workspaces: client/src-tauri -> target
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+
+      - name: Install frontend dependencies without changing the lockfile
+        working-directory: client
+        run: |
+          set -euo pipefail
+          test "$(pnpm --version)" = "9.15.9"
+          pnpm install --frozen-lockfile
+          sha256sum pnpm-lock.yaml | cut -d' ' -f1 > "$RUNNER_TEMP/pnpm-lock.before"
+
+      - name: Build Android ARM64 debug APK
+        working-directory: client
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+        run: node node_modules/@tauri-apps/cli/tauri.js android build --debug --apk --target aarch64 --ci
+
+      - name: Inspect Android debug APK
+        run: |
+          set -euo pipefail
+          APK=client/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk
+          test -s "$APK"
+          test "$(sha256sum client/pnpm-lock.yaml | cut -d' ' -f1)" = "$(cat "$RUNNER_TEMP/pnpm-lock.before")"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "package: name='rs.phase.app.debug'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "sdkVersion:'24'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "targetSdkVersion:'36'" "$RUNNER_TEMP/apk-badging.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          zipinfo -1 "$APK" | grep -q '^lib/arm64-v8a/libphase_tauri_lib.so$'
+          test "$(zipinfo -1 "$APK" | grep '^lib/.*/libphase_tauri_lib.so$' | wc -l)" = 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tauri-android-debug-arm64
+          path: client/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk
+          retention-days: 7
 
   rust-check:
     name: Rust (fmt, clippy, test, coverage-gate)
@@ -688,6 +758,7 @@ jobs:
       - draft-pools
       - wasm-check
       - tauri-check
+      - tauri-android-check
     if: always()
     steps:
       - name: Check split Rust jobs
@@ -698,8 +769,9 @@ jobs:
           DRAFT_POOLS_RESULT: ${{ needs.draft-pools.result }}
           WASM_RESULT: ${{ needs.wasm-check.result }}
           TAURI_RESULT: ${{ needs.tauri-check.result }}
+          TAURI_ANDROID_RESULT: ${{ needs.tauri-android-check.result }}
         run: |
-          results="$RUST_LINT_RESULT $RUST_TEST_RESULT $CARD_DATA_RESULT $DRAFT_POOLS_RESULT $WASM_RESULT $TAURI_RESULT"
+          results="$RUST_LINT_RESULT $RUST_TEST_RESULT $CARD_DATA_RESULT $DRAFT_POOLS_RESULT $WASM_RESULT $TAURI_RESULT $TAURI_ANDROID_RESULT"
           # `skipped` is a pass: draft-pools is main-only and is skipped on PRs.
           for result in $results; do
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
