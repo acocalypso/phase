@@ -6154,7 +6154,7 @@ impl PlayerScope {
     ///
     /// Any resolver reachable from DESERIALIZED data must reject them here
     /// rather than reaching that `unreachable!()`: `IsMonarch { player }` is
-    /// serde-constructible from `card-data.json` and from mtgish input, so a
+    /// serde-constructible from `card-data.json`, so a
     /// malformed or hand-authored row must fail closed, not panic the engine
     /// inside a trigger-condition check.
     pub(crate) fn duration_timing_only(&self) -> bool {
@@ -15608,8 +15608,8 @@ fn default_distinct_names() -> Vec<SharedQuality> {
 /// producers were `parse_number_of_distinct_colors_among_permanents_tail`
 /// (craft materials → `And { [ExiledBySource, Typed] }`, or a `parse_type_phrase`
 /// object filter) and `parse_for_each_distinct_colors_among_permanents`
-/// (`parse_type_phrase` only), plus the mtgish-import converter (`Typed`) —
-/// none of which can yield a BARE `ExiledBySource` / `TrackedSet` filter.
+/// (`parse_type_phrase` only) — neither can yield a BARE `ExiledBySource` /
+/// `TrackedSet` filter.
 fn deserialize_distinct_colors_population<'de, D>(
     deserializer: D,
 ) -> Result<CardTypeSetSource, D::Error>
@@ -23620,6 +23620,13 @@ pub struct TriggerDefinition {
     /// controller (see `ClashResult::for_player` / `match_clash`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clash_result: Option<ClashResult>,
+    /// CR 709.5 + CR 709.5h: The Room half (door) this trigger's printed text
+    /// lives on. Stamped when a split Room's two halves are wired onto a game
+    /// object; a door's trigger functions only while that half is unlocked,
+    /// and an unlock trigger fires only for its own door's event. `None` for
+    /// every non-Room trigger: no door gating.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room_door: Option<crate::game::game_object::RoomDoor>,
 }
 
 /// CR 605.1b: Which aggregate mana output a mana-ability trigger requires.
@@ -24156,11 +24163,18 @@ impl TriggerDefinition {
             taps_for_mana_produced: None,
             mana_ability_produced: None,
             clash_result: None,
+            room_door: None,
         }
     }
 
     pub fn execute(mut self, ability: AbilityDefinition) -> Self {
         self.execute = Some(Box::new(ability));
+        self
+    }
+
+    /// CR 709.5: tag this trigger as living on the given Room half.
+    pub fn room_door(mut self, door: crate::game::game_object::RoomDoor) -> Self {
+        self.room_door = Some(door);
         self
     }
 
@@ -24670,9 +24684,8 @@ pub enum DamageModification {
     /// any amount; the replacement is not consumed — continuous, not
     /// shield-style, distinct from `ShieldKind::Prevention { All }`).
     ///
-    /// Provenance is a sibling variant rather than a field on `Minus` because
-    /// the dormant, contributor-frozen `crates/mtgish-import` constructs
-    /// `Minus { value }` literals that a new mandatory field would break.
+    /// Provenance is a sibling variant rather than a field on `Minus` to
+    /// preserve the established `Minus { value }` construction shape.
     PreventionMinus { value: u32 },
     /// CR 614.1a: Conditional — if amount < source's power, set amount = source's power.
     /// References the replacement source's (not the damage source's) current post-layer power.
@@ -29489,6 +29502,7 @@ mod tests {
             taps_for_mana_produced: None,
             mana_ability_produced: None,
             clash_result: None,
+            room_door: Some(crate::game::game_object::RoomDoor::Left),
         };
         let json = serde_json::to_string(&trigger).unwrap();
         let deserialized: TriggerDefinition = serde_json::from_str(&json).unwrap();
