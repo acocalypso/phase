@@ -44,7 +44,7 @@ afterEach(() => {
 describe("Tauri document external-link routing", () => {
   it.each([
     "https://",
-    "/relative",
+    "//example.com/cards",
     "file:///tmp/card.txt",
     "mailto:player@example.com",
     "tel:+123456",
@@ -54,6 +54,15 @@ describe("Tauri document external-link routing", () => {
     expect(mocks.moduleLoaded).not.toHaveBeenCalled();
     expect(mocks.openUrl).not.toHaveBeenCalled();
   });
+
+  it.each(["/setup", "my-decks", "?tab=recent", "#news"])(
+    "preserves React Router-style relative menu link %s",
+    (url) => {
+      expect(click(url).defaultPrevented).toBe(false);
+      expect(mocks.moduleLoaded).not.toHaveBeenCalled();
+      expect(mocks.openUrl).not.toHaveBeenCalled();
+    },
+  );
 
   it("ignores an anchor without an href", () => {
     const anchor = document.createElement("a");

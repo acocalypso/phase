@@ -43,6 +43,13 @@ export function installTauriExternalLinkHandler(): void {
 
       const href = anchor.getAttribute("href");
       if (!href) return;
+
+      // React Router renders in-app navigation as ordinary relative anchors.
+      // Leave those (including query/hash-only links) to its bubble-phase
+      // handler. Protocol-relative URLs are external, not app routes, and must
+      // fail closed instead of inheriting the bundled origin's HTTP scheme.
+      const hasScheme = /^[A-Za-z][A-Za-z\d+.-]*:/.test(href);
+      if (!hasScheme && !href.startsWith("//")) return;
       if (!isOpenableExternalUrl(href)) {
         event.preventDefault();
         return;
