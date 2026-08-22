@@ -158,6 +158,10 @@ mod tests {
     }
 
     fn verify_android_config(root: &Path) -> Result<(), String> {
+        let base: Value = serde_json::from_str(
+            &fs::read_to_string(root.join("tauri.conf.json")).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
         let overlay: Value = serde_json::from_str(
             &fs::read_to_string(root.join("tauri.android.conf.json")).map_err(|e| e.to_string())?,
         )
@@ -175,9 +179,9 @@ mod tests {
         }
         let config: tauri::Config =
             serde_json::from_value(merged.clone()).map_err(|e| e.to_string())?;
-        if config.product_name.as_deref() != Some("Phase")
-            || config.version.as_deref() != Some("0.60.0")
-            || config.identifier != "rs.phase.app"
+        if config.product_name.as_deref() != base["productName"].as_str()
+            || config.version.as_deref() != base["version"].as_str()
+            || config.identifier != base["identifier"].as_str().unwrap()
         {
             return Err("base product/version/identifier authority was not inherited".into());
         }
@@ -261,8 +265,13 @@ mod tests {
     fn installed_android_config_schema_admits_only_the_four_real_properties() {
         let schema_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../node_modules/@tauri-apps/cli/config.schema.json");
-        let schema: Value =
-            serde_json::from_str(&fs::read_to_string(schema_path).unwrap()).unwrap();
+        let raw = fs::read_to_string(&schema_path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read installed Tauri config schema at {}; run the frontend dependency install first: {error}",
+                schema_path.display()
+            )
+        });
+        let schema: Value = serde_json::from_str(&raw).unwrap();
         let android = &schema["definitions"]["AndroidConfig"];
         let properties = android["properties"].as_object().unwrap();
         let actual: BTreeSet<_> = properties.keys().map(String::as_str).collect();
@@ -482,7 +491,17 @@ mod tests {
                 .iter()
                 .flat_map(|capability| capability_permissions(capability))
                 .collect();
-            assert!(permissions.contains("core:window:allow-set-fullscreen"));
+            for required in [
+                "core:window:allow-set-fullscreen",
+                "process:allow-exit",
+                "process:allow-restart",
+                "updater:default",
+            ] {
+                assert!(
+                    permissions.contains(required),
+                    "missing {required} on local {platform}"
+                );
+            }
         }
         let trusted = "https://phase-rs.dev/game";
         for platform in ["android", "iOS"] {

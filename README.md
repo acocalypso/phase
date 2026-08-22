@@ -169,12 +169,16 @@ adb -s <serial> shell monkey -p rs.phase.app.debug -c android.intent.category.LA
 
 Official releases publish separately signed `Phase-Android-ARM64.apk` and
 `Phase-Android-ARMv7.apk` files. Release builds fail closed unless all four
-signing inputs are nonempty: `PHASE_ANDROID_KEYSTORE_FILE`,
+local signing inputs are nonempty: `PHASE_ANDROID_KEYSTORE_FILE`,
 `PHASE_ANDROID_KEYSTORE_PASSWORD`, `PHASE_ANDROID_KEY_ALIAS`, and
 `PHASE_ANDROID_KEY_PASSWORD` (equivalent Gradle properties use the
-`phase.android.*` names in `app/build.gradle.kts`). The keystore path must name
-an existing file; secret values must be supplied through the build environment
-and are never committed.
+`phase.android.*` names in `app/build.gradle.kts`). The local keystore path must
+name an existing file. CI instead requires the `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`
+secrets; it decodes the first into a runner-local keystore and maps the other
+three to the Gradle inputs. CI also requires the protected
+`ANDROID_CERTIFICATE_SHA256` secret and verifies that both APKs use that exact
+release certificate. Secret values are never committed.
 
 Android `versionCode` is derived strictly from `major.minor.patch` as
 `major * 1_000_000 + minor * 1_000 + patch`; minor and patch must each fit a

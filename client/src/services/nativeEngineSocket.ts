@@ -35,7 +35,10 @@ export class NativeEngineSocket {
   private _readyState = NativeEngineSocket.CONNECTING;
 
   constructor() {
-    void this.connect();
+    // Match the browser WebSocket lifecycle: construction returns while the
+    // socket is CONNECTING, giving callers a chance to install terminal-event
+    // handlers before even a platform-boundary failure can be dispatched.
+    queueMicrotask(() => void this.connect());
   }
 
   get readyState(): number {

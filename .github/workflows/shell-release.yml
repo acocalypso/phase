@@ -10,8 +10,7 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: shell-release-${{ inputs.tag || github.ref_name }}
@@ -23,6 +22,8 @@ jobs:
     if: github.repository == 'phase-rs/phase'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     outputs:
       release_tag: ${{ steps.resolve.outputs.release_tag }}
       release_sha: ${{ steps.resolve.outputs.release_sha }}
@@ -64,6 +65,8 @@ jobs:
     needs: [resolve-shell-ref]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
     env:
       RELEASE_SHA: ${{ needs.resolve-shell-ref.outputs.release_sha }}
       SHELL_VERSION: ${{ needs.resolve-shell-ref.outputs.shell_version }}
@@ -150,6 +153,8 @@ jobs:
     needs: [resolve-shell-ref, shell-preflight]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    permissions:
+      contents: read
     env:
       RELEASE_SHA: ${{ needs.resolve-shell-ref.outputs.release_sha }}
       SHELL_VERSION: ${{ needs.resolve-shell-ref.outputs.shell_version }}
@@ -323,6 +328,8 @@ jobs:
     needs: [resolve-shell-ref, shell-preflight]
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    permissions:
+      contents: read
     env:
       RELEASE_SHA: ${{ needs.resolve-shell-ref.outputs.release_sha }}
       SHELL_VERSION: ${{ needs.resolve-shell-ref.outputs.shell_version }}
@@ -338,19 +345,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: client/pnpm-lock.yaml
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: aarch64-linux-android,armv7-linux-androideabi
-          cache-shared-key: rust-shell-android
-          cache-workspaces: client/src-tauri -> target
+          cache: false
 
       - name: Install pinned Android SDK and NDK
         run: |
@@ -446,6 +452,8 @@ jobs:
           "$NODE_BIN" "$TAURI_JS" android build --target aarch64 armv7 --split-per-abi --apk
 
       - name: Inspect and stage signed Android APKs
+        env:
+          ANDROID_CERTIFICATE_SHA256: ${{ secrets.ANDROID_CERTIFICATE_SHA256 }}
         run: |
           set -euo pipefail
           AAPT2="$ANDROID_HOME/build-tools/36.0.0/aapt2"
@@ -465,6 +473,11 @@ jobs:
           test -n "$ARM64_APK"
           test -n "$ARMV7_APK"
 
+          expected_digest=$(printf '%s' "${ANDROID_CERTIFICATE_SHA256:-}" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')
+          if ! [[ "$expected_digest" =~ ^[0-9A-F]{64}$ ]]; then
+            echo '::error::ANDROID_CERTIFICATE_SHA256 must be the protected release certificate SHA-256 digest'
+            exit 1
+          fi
           signer_digest=''
           for apk in "$ARM64_APK" "$ARMV7_APK"; do
             BADGING=$($AAPT2 dump badging "$apk")
@@ -474,8 +487,8 @@ jobs:
             SIGNING=$($APKSIGNER verify --verbose --print-certs "$apk")
             grep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' <<<"$SIGNING"
             ! grep -Fq 'CN=Android Debug' <<<"$SIGNING"
-            digest=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$SIGNING")
-            test -n "$digest"
+            digest=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$SIGNING" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')
+            test "$digest" = "$expected_digest"
             if [ -z "$signer_digest" ]; then signer_digest="$digest"; else test "$digest" = "$signer_digest"; fi
             if unzip -Z1 "$apk" | grep -Eq '(^|/)(update\.json|.*\.sig)$'; then
               echo 'Android release APK unexpectedly contains updater material'
@@ -497,6 +510,8 @@ jobs:
     needs: [resolve-shell-ref, build-shell, build-android]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     env:
       SHELL_TAG: ${{ needs.resolve-shell-ref.outputs.release_tag }}
       SHELL_VERSION: ${{ needs.resolve-shell-ref.outputs.shell_version }}

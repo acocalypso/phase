@@ -37,6 +37,7 @@ beforeAll(() => {
 
 afterEach(() => {
   mocks.bundled = false;
+  mocks.tauri = true;
   mocks.openUrl.mockReset();
   vi.restoreAllMocks();
 });
@@ -92,11 +93,20 @@ describe("Tauri document external-link routing", () => {
     expect(mocks.openUrl).not.toHaveBeenCalled();
   });
 
-  it("installs only once and does not install in a browser", () => {
+  it("installs only once", () => {
     const add = vi.spyOn(document, "addEventListener");
     installTauriExternalLinkHandler();
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("does not install in a browser from a fresh module registry", async () => {
+    vi.resetModules();
     mocks.tauri = false;
-    installTauriExternalLinkHandler();
+    const add = vi.spyOn(document, "addEventListener");
+    const freshModule = await import("../externalLinks");
+
+    freshModule.installTauriExternalLinkHandler();
+
     expect(add).not.toHaveBeenCalled();
   });
 

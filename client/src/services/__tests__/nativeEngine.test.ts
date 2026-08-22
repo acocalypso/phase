@@ -33,13 +33,14 @@ describe("native engine desktop boundary", () => {
   });
 
   it("retains desktop command and event reachability", async () => {
+    const key = { release: { version: "0.60.0" } } as const;
     isDesktopTauriMock.mockReturnValue(true);
     invokeMock.mockResolvedValueOnce({ port: 9374 }).mockResolvedValueOnce(null);
     listenMock.mockResolvedValue(vi.fn());
-    await expect(ensureNativeEngine({ release: { version: "0.60.0" } })).resolves.toEqual({ port: 9374 });
+    await expect(ensureNativeEngine(key)).resolves.toEqual({ port: 9374 });
     await expect(getNativeEngineProgress()).resolves.toBeNull();
     await subscribeNativeEngineProgress(vi.fn());
-    expect(invokeMock).toHaveBeenCalledWith("ensure_native_engine", expect.any(Object));
+    expect(invokeMock).toHaveBeenCalledWith("ensure_native_engine", { key });
     expect(invokeMock).toHaveBeenCalledWith("native_engine_progress");
     expect(listenMock).toHaveBeenCalledWith("native-engine-progress", expect.any(Function));
   });

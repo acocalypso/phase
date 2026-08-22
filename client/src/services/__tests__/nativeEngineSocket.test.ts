@@ -29,6 +29,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("../platform", () => ({ isDesktopTauri: isDesktopTauriMock }));
 
 import { NativeEngineSocket } from "../nativeEngineSocket";
+import { openPhaseSocket } from "../openPhaseSocket";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -62,10 +63,26 @@ describe("NativeEngineSocket", () => {
   it("does not construct a channel or invoke commands outside desktop Tauri", async () => {
     isDesktopTauriMock.mockReturnValue(false);
     const socket = new NativeEngineSocket();
+    const events: string[] = [];
+    socket.onerror = () => events.push("error");
+    socket.onclose = () => events.push("close");
 
-    await Promise.resolve();
+    expect(socket.readyState).toBe(NativeEngineSocket.CONNECTING);
+    await vi.waitFor(() => expect(socket.readyState).toBe(NativeEngineSocket.CLOSED));
 
-    expect(socket.readyState).toBe(NativeEngineSocket.CLOSED);
+    expect(events).toEqual(["error", "close"]);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-desktop phase handshake instead of hanging", async () => {
+    isDesktopTauriMock.mockReturnValue(false);
+
+    await expect(
+      openPhaseSocket("ws://native-engine", {
+        socketFactory: () => new NativeEngineSocket(),
+        timeoutMs: 100,
+      }),
+    ).rejects.toThrow("WebSocket error during handshake");
     expect(invokeMock).not.toHaveBeenCalled();
   });
   it("buffers Channel messages until connection resolves and preserves their order", async () => {
