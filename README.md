@@ -148,9 +148,14 @@ corepack pnpm@9.15.9 install --frozen-lockfile
 NODE_BIN="$(realpath "$(command -v node)")"
 TAURI_JS="$(pwd)/node_modules/@tauri-apps/cli/tauri.js"
 export ORG_GRADLE_PROJECT_phaseNodeExecutable="$NODE_BIN"
-"$NODE_BIN" "$TAURI_JS" android init
 "$NODE_BIN" "$TAURI_JS" android build --debug --target aarch64 --apk
 ```
+
+The generated Android project is checked in at `client/src-tauri/gen/android`
+and its Gradle/Rust integration is maintained by the repository. Do not run
+`android init` during normal development: regeneration is supported only by a
+documented deterministic reapply process that restores and verifies the
+maintained integration.
 
 Debug APKs are written below
 `client/src-tauri/gen/android/app/build/outputs/apk/`. Install and cold-launch

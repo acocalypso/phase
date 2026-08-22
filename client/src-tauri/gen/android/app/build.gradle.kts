@@ -32,14 +32,33 @@ fun strictAndroidVersionCode(version: String): Int {
 
 val androidVersionName = tauriProperties.getProperty("tauri.android.versionName", "1.0.0")
 val androidVersionCode = strictAndroidVersionCode(androidVersionName)
-val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
 
-fun requiredReleaseSecret(gradleProperty: String, environmentVariable: String): String =
+fun releaseSecret(gradleProperty: String, environmentVariable: String): String? =
     providers.gradleProperty(gradleProperty)
         .orElse(providers.environmentVariable(environmentVariable))
         .orNull
         ?.takeIf { it.isNotBlank() }
-        ?: throw GradleException("Missing required Android release signing input: $environmentVariable")
+
+val releaseSigningInputs = mapOf(
+    "PHASE_ANDROID_KEYSTORE_FILE" to releaseSecret(
+        "phase.android.keystore.file",
+        "PHASE_ANDROID_KEYSTORE_FILE",
+    ),
+    "PHASE_ANDROID_KEYSTORE_PASSWORD" to releaseSecret(
+        "phase.android.keystore.password",
+        "PHASE_ANDROID_KEYSTORE_PASSWORD",
+    ),
+    "PHASE_ANDROID_KEY_ALIAS" to releaseSecret(
+        "phase.android.key.alias",
+        "PHASE_ANDROID_KEY_ALIAS",
+    ),
+    "PHASE_ANDROID_KEY_PASSWORD" to releaseSecret(
+        "phase.android.key.password",
+        "PHASE_ANDROID_KEY_PASSWORD",
+    ),
+)
+val missingReleaseSigningInputs = releaseSigningInputs.filterValues { it == null }.keys
+val releaseSigningConfigured = missingReleaseSigningInputs.isEmpty()
 
 android {
     compileSdk = 36
@@ -53,27 +72,15 @@ android {
         versionName = androidVersionName
     }
     signingConfigs {
-        if (releaseRequested) {
+        if (releaseSigningConfigured) {
             create("release") {
-                val keystorePath = requiredReleaseSecret(
-                    "phase.android.keystore.file",
-                    "PHASE_ANDROID_KEYSTORE_FILE",
-                )
+                val keystorePath = releaseSigningInputs.getValue("PHASE_ANDROID_KEYSTORE_FILE")!!
                 storeFile = file(keystorePath).also {
                     if (!it.isFile) throw GradleException("Android release keystore is not a file")
                 }
-                storePassword = requiredReleaseSecret(
-                    "phase.android.keystore.password",
-                    "PHASE_ANDROID_KEYSTORE_PASSWORD",
-                )
-                keyAlias = requiredReleaseSecret(
-                    "phase.android.key.alias",
-                    "PHASE_ANDROID_KEY_ALIAS",
-                )
-                keyPassword = requiredReleaseSecret(
-                    "phase.android.key.password",
-                    "PHASE_ANDROID_KEY_PASSWORD",
-                )
+                storePassword = releaseSigningInputs.getValue("PHASE_ANDROID_KEYSTORE_PASSWORD")!!
+                keyAlias = releaseSigningInputs.getValue("PHASE_ANDROID_KEY_ALIAS")!!
+                keyPassword = releaseSigningInputs.getValue("PHASE_ANDROID_KEY_PASSWORD")!!
             }
         }
     }
@@ -91,7 +98,7 @@ android {
             }
         }
         getByName("release") {
-            if (releaseRequested) signingConfig = signingConfigs.getByName("release")
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
@@ -105,6 +112,19 @@ android {
     }
     buildFeatures {
         buildConfig = true
+    }
+}
+
+if (!releaseSigningConfigured) {
+    tasks.configureEach {
+        if (name.contains("release", ignoreCase = true)) {
+            doFirst {
+                throw GradleException(
+                    "Missing required Android release signing inputs: " +
+                        missingReleaseSigningInputs.joinToString(", ")
+                )
+            }
+        }
     }
 }
 

@@ -802,14 +802,18 @@ jobs:
           TAURI_RESULT: ${{ needs.tauri-check.result }}
           ANDROID_RESULT: ${{ needs.android-debug-apk.result }}
         run: |
-          results="$RUST_LINT_RESULT $RUST_TEST_RESULT $CARD_DATA_RESULT $DRAFT_POOLS_RESULT $WASM_RESULT $TAURI_RESULT $ANDROID_RESULT"
-          # `skipped` is a pass: draft-pools is main-only and is skipped on PRs.
-          for result in $results; do
-            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
-              echo "One or more split Rust jobs failed: $results"
+          required_results="$RUST_LINT_RESULT $RUST_TEST_RESULT $CARD_DATA_RESULT $WASM_RESULT $TAURI_RESULT $ANDROID_RESULT"
+          for result in $required_results; do
+            if [ "$result" != "success" ]; then
+              echo "One or more required split Rust jobs failed: $required_results"
               exit 1
             fi
           done
+          # draft-pools is main-only, so it alone may be skipped on pull requests.
+          if [ "$DRAFT_POOLS_RESULT" != "success" ] && [ "$DRAFT_POOLS_RESULT" != "skipped" ]; then
+            echo "Draft pools job failed: $DRAFT_POOLS_RESULT"
+            exit 1
+          fi
 
   lobby-worker-test:
     name: Lobby worker (pnpm test)
