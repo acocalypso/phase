@@ -802,14 +802,20 @@ jobs:
           TAURI_RESULT: ${{ needs.tauri-check.result }}
           ANDROID_RESULT: ${{ needs.android-debug-apk.result }}
         run: |
-          required_results="$RUST_LINT_RESULT $RUST_TEST_RESULT $CARD_DATA_RESULT $WASM_RESULT $TAURI_RESULT $ANDROID_RESULT"
+          required_results="$RUST_LINT_RESULT $RUST_TEST_RESULT $CARD_DATA_RESULT $WASM_RESULT $ANDROID_RESULT"
           for result in $required_results; do
             if [ "$result" != "success" ]; then
               echo "One or more required split Rust jobs failed: $required_results"
               exit 1
             fi
           done
-          # draft-pools is main-only, so it alone may be skipped on pull requests.
+          # tauri-check is intentionally disabled above until Linux dependency
+          # setup is reliable; Android is still required to succeed.
+          if [ "$TAURI_RESULT" != "success" ] && [ "$TAURI_RESULT" != "skipped" ]; then
+            echo "Tauri check failed: $TAURI_RESULT"
+            exit 1
+          fi
+          # draft-pools is main-only, so it may be skipped on pull requests.
           if [ "$DRAFT_POOLS_RESULT" != "success" ] && [ "$DRAFT_POOLS_RESULT" != "skipped" ]; then
             echo "Draft pools job failed: $DRAFT_POOLS_RESULT"
             exit 1
