@@ -757,7 +757,7 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           BADGING=$($AAPT2 dump badging "$APK")
           grep -F "package: name='rs.phase.app.debug' versionCode='60000' versionName='0.60.0'" <<<"$BADGING"
-          grep -F "sdkVersion:'24'" <<<"$BADGING"
+          grep -F "minSdkVersion:'24'" <<<"$BADGING"
           grep -F "targetSdkVersion:'36'" <<<"$BADGING"
 
           SIGNING=$($APKSIGNER verify --verbose --print-certs "$APK")

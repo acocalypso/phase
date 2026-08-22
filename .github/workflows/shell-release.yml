@@ -482,7 +482,7 @@ jobs:
           for apk in "$ARM64_APK" "$ARMV7_APK"; do
             BADGING=$($AAPT2 dump badging "$apk")
             grep -F "package: name='rs.phase.app' versionCode='$ANDROID_VERSION_CODE' versionName='$SHELL_VERSION'" <<<"$BADGING"
-            grep -F "sdkVersion:'24'" <<<"$BADGING"
+            grep -F "minSdkVersion:'24'" <<<"$BADGING"
             grep -F "targetSdkVersion:'36'" <<<"$BADGING"
             SIGNING=$($APKSIGNER verify --verbose --print-certs "$apk")
             grep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' <<<"$SIGNING"
