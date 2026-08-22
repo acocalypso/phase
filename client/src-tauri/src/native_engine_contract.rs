@@ -23,6 +23,9 @@ pub struct NativeEngineProgress {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
+// Mobile keeps the complete serialized desktop ABI so frontend consumers see
+// one stable contract, while its compatibility layer can only emit a subset.
+#[cfg_attr(mobile, allow(dead_code))]
 pub enum NativeEngineProgressPhase {
     Resolving,
     DownloadingBinary,
@@ -35,6 +38,8 @@ pub enum NativeEngineProgressPhase {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+// See `NativeEngineProgressPhase`: these variants are a shared wire contract.
+#[cfg_attr(mobile, allow(dead_code))]
 pub enum NativeEngineError {
     InvalidKey {
         detail: String,
@@ -71,6 +76,8 @@ pub enum NativeEngineError {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
+// See `NativeEngineProgressPhase`: these variants are a shared wire contract.
+#[cfg_attr(mobile, allow(dead_code))]
 pub enum BridgeEvent {
     Message { text: String },
     Closed { code: u16, reason: String },
@@ -79,6 +86,8 @@ pub enum BridgeEvent {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+// See `NativeEngineProgressPhase`: these variants are a shared wire contract.
+#[cfg_attr(mobile, allow(dead_code))]
 pub enum NativeEngineBridgeError {
     NotRunning {
         detail: String,
