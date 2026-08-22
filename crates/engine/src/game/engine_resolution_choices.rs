@@ -3901,6 +3901,7 @@ pub(super) fn handle_resolution_choice(
                 allows_partial_find,
                 constraint,
                 split,
+                ..
             },
             GameAction::SelectCards { cards: chosen },
         ) => {
@@ -9513,6 +9514,7 @@ mod tests {
             up_to: false,
             allows_partial_find: false,
             constraint: crate::types::ability::SearchSelectionConstraint::None,
+            ordering_hint: Default::default(),
             split: None,
         };
 
@@ -10512,6 +10514,8 @@ mod tests {
             trigger_definitions: std::sync::Arc::default(),
             replacement_definitions: std::sync::Arc::default(),
             static_definitions: std::sync::Arc::default(),
+            room_halves: None,
+            name_origin: Default::default(),
         })
     }
 

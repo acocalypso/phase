@@ -3188,9 +3188,13 @@ pub(crate) fn collect_completed_mana_frame_events(
         .filter(|index| !(historical_copy_start..historical_copy_end).contains(index))
         .filter(|index| {
             let occurrence = super::triggers::trigger_event_occurrence(events, *index);
-            !consumed
-                .iter()
-                .any(|claimed| claimed.event == events[*index] && claimed.occurrence == occurrence)
+            !consumed.iter().any(|claimed| {
+                claimed.event == events[*index]
+                    && claimed.occurrence == occurrence
+                    && claimed
+                        .scope
+                        .consumes(super::triggers::TriggerCollectionRequester::Ordinary)
+            })
         })
         .collect();
     let mut batch = deferred;
@@ -3206,6 +3210,7 @@ pub(crate) fn collect_completed_mana_frame_events(
             |index| crate::game::triggers::ConsumedTriggerEventOccurrence {
                 event: events[index].clone(),
                 occurrence: super::triggers::trigger_event_occurrence(events, index),
+                scope: crate::game::triggers::ConsumedTriggerEventScope::AllCollectors,
             },
         )
         .collect();
@@ -3353,11 +3358,13 @@ pub(crate) fn resume_mana_ability_root(
             object_id,
             cost,
             announced_x,
+            cost_source,
         } => super::morph::resume_turn_face_up_payment(
             state,
             player,
             object_id,
             cost,
+            cost_source,
             announced_x,
             events,
         ),
@@ -3480,10 +3487,18 @@ pub(crate) fn finish_mana_root_after_deferred_life_payment(
             player,
             object_id,
             announced_x,
+            cost_source,
             ..
         // CR 702.37e + CR 107.3d: payment has completed, so commit the
         // turn-face-up action with its already-announced X value.
-        } => super::morph::finish_paid_turn_face_up(state, player, object_id, announced_x, events),
+        } => super::morph::finish_paid_turn_face_up(
+            state,
+            player,
+            object_id,
+            cost_source,
+            announced_x,
+            events,
+        ),
         ManaAbilityResume::EndContinuousEffect { player, group, .. } => Ok(
             super::end_continuous_effect::finish_paid_end_continuous_effect(
                 state, player, group, events,

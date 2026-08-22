@@ -76,8 +76,10 @@ use super::zone_pipeline::{self, ZoneMoveRequest, ZoneMoveResult};
 use super::zones;
 
 pub use super::engine_resolve_batch::{
-    resolve_all_fast_forward, resolve_all_ready_is_authorized, resolve_all_ready_prefix,
-    ResolveAllCallbackDecision, ResolveAllFastForwardResult,
+    pending_resolve_all_ready_requester, recover_orphaned_resolve_all, resolve_all_fast_forward,
+    resolve_all_ready_access, resolve_all_ready_prefix, resolve_all_ready_prefix_with,
+    ResolveAllCallbackDecision, ResolveAllContinuation, ResolveAllFastForwardResult,
+    ResolveAllReadyAccess,
 };
 
 #[derive(Debug, Clone, Error)]
@@ -792,20 +794,21 @@ fn handle_unlock_room_door(
                 "That door is already unlocked".to_string(),
             ));
         }
-        // CR 709.5e: the unlock cost is the locked HALF's mana cost. Doors are
-        // printed halves, not live/back slots — after the back half was cast
-        // (`modal_back_face`), the LIVE face is the right door and the left
-        // door's cost lives on `back_face`. `room::live_face_door` is the
-        // single orientation authority (same mapping as CR 709.5d entry).
-        if door == super::room::live_face_door(obj) {
-            obj.mana_cost.clone()
-        } else {
-            obj.back_face
+        // CR 709.5e + CR 707.2: the unlock cost is the locked HALF's mana cost,
+        // read from the EFFECTIVE halves (printed order) — the copied snapshot
+        // when a copy effect applies, else the object's own printed halves
+        // (whose orientation `room::own_room_halves` resolves through
+        // `live_face_door`, the same CR 709.5d mapping as before).
+        let halves = super::room::effective_room_halves(obj);
+        match door {
+            crate::game::game_object::RoomDoor::Left => halves.left.mana_cost.clone(),
+            crate::game::game_object::RoomDoor::Right => halves
+                .right
                 .as_ref()
-                .map(|face| face.mana_cost.clone())
+                .map(|half| half.mana_cost.clone())
                 .ok_or_else(|| {
                     EngineError::ActionNotAllowed("Room has no second door face".to_string())
-                })?
+                })?,
         }
     };
 
@@ -19352,9 +19355,12 @@ mod stage2_injector_tests {
                 // resume/finalization helpers are above this existing producer;
                 // they do not mint an optional-effect prompt. The census above
                 // still finds exactly the same five production producers.
-                "game/effects/mod.rs:7344".to_string(),
-                "game/effects/mod.rs:7421".to_string(),
-                "game/effects/mod.rs:11248".to_string(),
+                // #7577 after merging upstream `07f5cfeb1`: all three producers
+                // move uniformly by -17. The census still reports exactly five
+                // production producers, and each remains in its named function.
+                "game/effects/mod.rs:7356".to_string(),
+                "game/effects/mod.rs:7433".to_string(),
+                "game/effects/mod.rs:11260".to_string(),
                 // UNMOVED across the rebase, and that is itself evidence the SET did not
                 // move: a census that had gained or lost a producer would not leave this
                 // entry both byte-identical AND at the same coordinate.
@@ -20109,7 +20115,37 @@ mod stage2_injector_tests {
                 //   `:13210 ⇒ :13130`. It creates no CR 603.5 prompt either — a special
                 //   action does not use the stack (CR 116.1) — and the pinned line is again
                 //   the same `OptionalEffectChoice` construction, moved wholesale.
-                "game/engine.rs:13135".to_string(),
+                //   ResolveAllReady latch-consumption fix: `:13135 ⇒ :13137`, `+2`.
+                //   The `engine_resolve_batch` re-export block is the whole of it, and
+                //   the symbol delta is ENUMERATED rather than counted: the block goes
+                //   from 5 names to 10. Six arrive —
+                //   `pending_resolve_all_ready_requester`,
+                //   `recover_orphaned_resolve_all`, `resolve_all_ready_access`,
+                //   `resolve_all_ready_prefix_with`, `ResolveAllContinuation`,
+                //   `ResolveAllReadyAccess` — and exactly one leaves,
+                //   `resolve_all_ready_is_authorized`. rustfmt spends two more lines on
+                //   the result. (`ResolveAllReadyAuthority` is NOT in the departure
+                //   column, though a reader tracking this change's history may expect it
+                //   there: `git grep` finds ZERO occurrences of that name anywhere in the
+                //   base tree, so nothing it could have departed from ever held it. That
+                //   is the whole of what is measurable, and this note asserts no more —
+                //   how any earlier wording came to be is drafting history, which git
+                //   cannot answer. Stated because a note whose weight is "MEASURED" earns
+                //   nothing if its enumeration is taken on trust.)
+                //   MEASURED, never carried: `diff -u` on this file between the base tree
+                //   and the candidate has exactly ONE hunk above this producer,
+                //   `@@ -76,8 +76,10 @@` — that block alone. Identity re-established on
+                //   BOTH controls, not assumed: the line at `:13137` is sha256-identical
+                //   (`8a544e87…5cc7d63`) to the producer at `:13135` in the base tree,
+                //   and its offset from `begin_pending_trigger_target_selection` is STILL
+                //   134 — the control that discriminates when the same mint text occurs
+                //   at several coordinates in this crate.
+                //   A re-export mints nothing: it NAMES symbols. None of the Resolve All
+                //   entry points it exposes constructs a CR 603.5 modal — they consume or
+                //   repair a `ResolveAllReady` latch, which `acting_player()` reports as
+                //   having no actor at all. The PRODUCER half stays 5 and the partition
+                //   stays 5/8/28.
+                "game/engine.rs:13138".to_string(),
             ],
             "the five production producers, NAMED: the CR 603.5 gate in `resolve_chain_body` \
              plus the two repeated-optional-payment drivers, the per-player acceptance cursor \
