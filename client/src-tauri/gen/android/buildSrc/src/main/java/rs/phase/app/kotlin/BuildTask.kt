@@ -171,11 +171,11 @@ abstract class BuildTask @Inject constructor(
                 add("android")
                 add("android-studio-script")
                 addAll(tauriVerbosityArgs(parseSelectableTauriLogLevel(tauriLogLevel.get())))
+                add("--target")
+                add(target.get())
                 if (release.get()) {
                     add("--release")
                 }
-                add("--target")
-                add(target.get())
             }
 
         execOperations
