@@ -42,7 +42,11 @@ export function installTauriExternalLinkHandler(): void {
       if (!anchor) return;
 
       const href = anchor.getAttribute("href");
-      if (!href || !isOpenableExternalUrl(href)) return;
+      if (!href) return;
+      if (!isOpenableExternalUrl(href)) {
+        event.preventDefault();
+        return;
+      }
       if (!isBundledTauriOrigin() && FIRST_PARTY_ORIGINS.has(new URL(href).origin)) return;
 
       event.preventDefault();

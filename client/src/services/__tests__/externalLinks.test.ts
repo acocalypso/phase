@@ -49,8 +49,19 @@ describe("Tauri document external-link routing", () => {
     "mailto:player@example.com",
     "tel:+123456",
     "phase://deck/1",
-  ])("rejects %s before preventing or loading opener", (url) => {
-    expect(click(url).defaultPrevented).toBe(false);
+  ])("blocks invalid or non-HTTP(S) anchor %s without loading opener", (url) => {
+    expect(click(url).defaultPrevented).toBe(true);
+    expect(mocks.moduleLoaded).not.toHaveBeenCalled();
+    expect(mocks.openUrl).not.toHaveBeenCalled();
+  });
+
+  it("ignores an anchor without an href", () => {
+    const anchor = document.createElement("a");
+    document.body.append(anchor);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    anchor.dispatchEvent(event);
+    anchor.remove();
+    expect(event.defaultPrevented).toBe(false);
     expect(mocks.moduleLoaded).not.toHaveBeenCalled();
     expect(mocks.openUrl).not.toHaveBeenCalled();
   });
