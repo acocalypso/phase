@@ -76,7 +76,7 @@ export function BuildBadge({ className = "", inline = false, compact = false }: 
       checkForServiceWorkerUpdate();
       return;
     }
-    if (!isTauri()) checkForServiceWorkerUpdate();
+    if (!isTauri() || !isBundledTauriOrigin()) checkForServiceWorkerUpdate();
   };
 
   const handleShowUpdateDebug = () => {

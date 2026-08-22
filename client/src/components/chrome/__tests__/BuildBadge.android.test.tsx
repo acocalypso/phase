@@ -44,7 +44,16 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-it("does not import app version or dispatch update paths on Android/iOS", () => {
+it("dispatches service-worker updates without the desktop updater on remote mobile Tauri", () => {
+  mocks.bundled.mockReturnValue(false);
+  render(<BuildBadge compact />);
+  fireEvent.click(screen.getByRole("button", { name: "buildBadge.checkForUpdates" }));
+  expect(mocks.getVersion).not.toHaveBeenCalled();
+  expect(mocks.tauriUpdate).not.toHaveBeenCalled();
+  expect(mocks.serviceWorker).toHaveBeenCalledOnce();
+});
+
+it("does not dispatch an updater from bundled mobile Tauri", () => {
   render(<BuildBadge compact />);
   fireEvent.click(screen.getByRole("button", { name: "buildBadge.checkForUpdates" }));
   expect(mocks.getVersion).not.toHaveBeenCalled();
