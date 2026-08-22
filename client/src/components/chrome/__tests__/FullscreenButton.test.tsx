@@ -1,15 +1,25 @@
 import { act, cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getCurrentWindowMock, isDesktopTauriMock } = vi.hoisted(() => ({
+const { getCurrentWindowMock, isDesktopTauriMock, isTauriMock } = vi.hoisted(() => ({
   getCurrentWindowMock: vi.fn(),
   isDesktopTauriMock: vi.fn(),
+  isTauriMock: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: getCurrentWindowMock }));
-vi.mock("../../../services/platform", () => ({ isDesktopTauri: isDesktopTauriMock }));
+vi.mock("../../../services/platform", () => ({
+  isDesktopTauri: isDesktopTauriMock,
+  isTauri: isTauriMock,
+}));
 
 import { FullscreenButton } from "../FullscreenButton";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  isDesktopTauriMock.mockReturnValue(false);
+  isTauriMock.mockReturnValue(false);
+});
 
 afterEach(() => {
   cleanup();
@@ -17,12 +27,23 @@ afterEach(() => {
 });
 
 describe("FullscreenButton Tauri synchronization", () => {
-  it("uses browser fullscreen wiring and never imports the Tauri window on mobile", () => {
-    isDesktopTauriMock.mockReturnValue(false);
+  it("renders nothing and installs no fullscreen wiring on mobile Tauri", () => {
+    isTauriMock.mockReturnValue(true);
     const addEventListener = vi.spyOn(document, "addEventListener");
 
-    render(<FullscreenButton variant="chrome" />);
+    const view = render(<FullscreenButton variant="chrome" />);
 
+    expect(view.container).toBeEmptyDOMElement();
+    expect(addEventListener).not.toHaveBeenCalledWith("fullscreenchange", expect.any(Function));
+    expect(getCurrentWindowMock).not.toHaveBeenCalled();
+  });
+
+  it("retains browser fullscreen wiring on plain web", () => {
+    const addEventListener = vi.spyOn(document, "addEventListener");
+
+    const view = render(<FullscreenButton variant="chrome" />);
+
+    expect(view.getByRole("button")).toBeInTheDocument();
     expect(addEventListener).toHaveBeenCalledWith("fullscreenchange", expect.any(Function));
     expect(getCurrentWindowMock).not.toHaveBeenCalled();
   });
