@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { ChannelMock, emitChannelEvent, invokeMock, resetChannelMock } = vi.hoisted(() => {
+const { ChannelMock, emitChannelEvent, invokeMock, isDesktopTauriMock, resetChannelMock } = vi.hoisted(() => {
   let listener: ((event: unknown) => void) | undefined;
 
   class ChannelMock<T> {
@@ -15,6 +15,7 @@ const { ChannelMock, emitChannelEvent, invokeMock, resetChannelMock } = vi.hoist
       listener?.(event);
     },
     invokeMock: vi.fn(),
+    isDesktopTauriMock: vi.fn(),
     resetChannelMock() {
       listener = undefined;
     },
@@ -25,6 +26,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   Channel: ChannelMock,
   invoke: invokeMock,
 }));
+vi.mock("../platform", () => ({ isDesktopTauri: isDesktopTauriMock }));
 
 import { NativeEngineSocket } from "../nativeEngineSocket";
 
@@ -44,15 +46,28 @@ function deferred<T>(): Deferred<T> {
 async function resolveConnection(connection: Deferred<number>, bridgeId = 7): Promise<void> {
   connection.resolve(bridgeId);
   await connection.promise;
+  await vi.waitFor(() => {
+    expect(invokeMock).toHaveBeenCalledWith("connect_native_engine", expect.any(Object));
+  });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   resetChannelMock();
   invokeMock.mockResolvedValue(undefined);
+  isDesktopTauriMock.mockReturnValue(true);
 });
 
 describe("NativeEngineSocket", () => {
+  it("does not construct a channel or invoke commands outside desktop Tauri", async () => {
+    isDesktopTauriMock.mockReturnValue(false);
+    const socket = new NativeEngineSocket();
+
+    await Promise.resolve();
+
+    expect(socket.readyState).toBe(NativeEngineSocket.CLOSED);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
   it("buffers Channel messages until connection resolves and preserves their order", async () => {
     const connection = deferred<number>();
     invokeMock.mockImplementation((command: string) => {
@@ -64,6 +79,9 @@ describe("NativeEngineSocket", () => {
 
     expect(socket.readyState).toBe(NativeEngineSocket.CONNECTING);
     expect(socket.readyState).toBe(0);
+    await vi.waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("connect_native_engine", expect.any(Object));
+    });
 
     emitChannelEvent({ type: "message", text: "first" });
     emitChannelEvent({ type: "message", text: "second" });
@@ -92,7 +110,9 @@ describe("NativeEngineSocket", () => {
 
     await resolveConnection(connection, 41);
 
-    expect(invokeMock).toHaveBeenCalledWith("native_engine_bridge_close", { id: 41 });
+    await vi.waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("native_engine_bridge_close", { id: 41 });
+    });
 
     emitChannelEvent({ type: "closed", code: 1000, reason: "normal" });
 

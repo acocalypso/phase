@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { getVersion } from "@tauri-apps/api/app";
 
 import { useCardDataMeta, formatRelativeDate } from "../../hooks/useCardDataMeta";
 import { checkForServiceWorkerUpdate } from "../../pwa/registerServiceWorker";
@@ -12,7 +11,7 @@ import {
   useUpdateError,
   getUpdateDebugReport,
 } from "../../pwa/updateStatus";
-import { isBundledTauriOrigin, isTauri } from "../../services/platform";
+import { isBundledTauriOrigin, isDesktopTauri, isTauri } from "../../services/platform";
 
 const UPDATED_LABEL_MS = 4500;
 const didAutoUpdate = consumeRecentAutoUpdateMarker();
@@ -32,7 +31,7 @@ export function BuildBadge({ className = "", inline = false, compact = false }: 
   const updateStatus = useUpdateStatus();
   const downloadProgress = useDownloadProgress();
   const updateError = useUpdateError();
-  const isRemoteTauriShell = isTauri() && !isBundledTauriOrigin();
+  const isRemoteTauriShell = isDesktopTauri() && !isBundledTauriOrigin();
 
   useEffect(() => {
     if (!showUpdatedLabel) return;
@@ -58,7 +57,8 @@ export function BuildBadge({ className = "", inline = false, compact = false }: 
     if (!isRemoteTauriShell) return;
 
     let active = true;
-    void getVersion()
+    void import("@tauri-apps/api/app")
+      .then(({ getVersion }) => getVersion())
       .then((version) => {
         if (active) setShellVersion(version);
       })
@@ -70,11 +70,13 @@ export function BuildBadge({ className = "", inline = false, compact = false }: 
   }, [isRemoteTauriShell]);
 
   const handleCheckUpdate = () => {
-    if (isTauri()) {
+    if (isDesktopTauri()) {
       checkForTauriUpdate();
       if (isBundledTauriOrigin()) return;
+      checkForServiceWorkerUpdate();
+      return;
     }
-    checkForServiceWorkerUpdate();
+    if (!isTauri()) checkForServiceWorkerUpdate();
   };
 
   const handleShowUpdateDebug = () => {
