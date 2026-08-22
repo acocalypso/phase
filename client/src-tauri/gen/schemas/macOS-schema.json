@@ -405,6 +405,12 @@
           "markdownDescription": "Allows first-party remote content to prepare a signed native engine for a typed channel key."
         },
         {
+          "description": "Allows the frontend to read the shell host platform.",
+          "type": "string",
+          "const": "allow-host-platform",
+          "markdownDescription": "Allows the frontend to read the shell host platform."
+        },
+        {
           "description": "Allows first-party remote content to mark a successful remote load.",
           "type": "string",
           "const": "allow-mark-remote-load-ok",
@@ -451,6 +457,12 @@
           "type": "string",
           "const": "allow-take-legacy-storage",
           "markdownDescription": "Allows first-party remote content to read staged legacy storage."
+        },
+        {
+          "description": "Denies reading the shell host platform.",
+          "type": "string",
+          "const": "deny-host-platform",
+          "markdownDescription": "Denies reading the shell host platform."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

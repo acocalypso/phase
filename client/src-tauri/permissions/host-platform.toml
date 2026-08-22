@@ -7,7 +7,3 @@ commands.allow = ["host_platform"]
 identifier = "deny-host-platform"
 description = "Denies reading the shell host platform."
 commands.deny = ["host_platform"]
-
-
-
-
