@@ -128,6 +128,56 @@ If `tilt` is installed, `setup.sh` skips the eager WASM + card-data build and `t
 cd client && pnpm install && pnpm dev # Start frontend
 ```
 
+### Android APKs
+
+Android builds require Node.js 22, pnpm 9.15.9, JDK 17, Android SDK platform
+36/build-tools 36.0.0, Android NDK 28.2.13676358, and the Rust Android targets:
+
+```bash
+rustup target add aarch64-linux-android armv7-linux-androideabi
+sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+```
+
+Install dependencies and invoke only the lock-installed Tauri CLI through an
+absolute Node executable. Initialization is deterministic and reapplies the
+maintained Gradle integration:
+
+```bash
+cd client
+corepack pnpm@9.15.9 install --frozen-lockfile
+NODE_BIN="$(realpath "$(command -v node)")"
+TAURI_JS="$(pwd)/node_modules/@tauri-apps/cli/tauri.js"
+export ORG_GRADLE_PROJECT_phaseNodeExecutable="$NODE_BIN"
+"$NODE_BIN" "$TAURI_JS" android init
+"$NODE_BIN" "$TAURI_JS" android build --debug --target aarch64 --apk
+```
+
+Debug APKs are written below
+`client/src-tauri/gen/android/app/build/outputs/apk/`. Install and cold-launch
+the ARM64 build on a selected device without relying on adb's implicit target:
+
+```bash
+adb -s <serial> install -r path/to/debug.apk
+adb -s <serial> shell am force-stop rs.phase.app.debug
+adb -s <serial> shell monkey -p rs.phase.app.debug -c android.intent.category.LAUNCHER 1
+```
+
+Official releases publish separately signed `Phase-Android-ARM64.apk` and
+`Phase-Android-ARMv7.apk` files. Release builds fail closed unless all four
+signing inputs are nonempty: `PHASE_ANDROID_KEYSTORE_FILE`,
+`PHASE_ANDROID_KEYSTORE_PASSWORD`, `PHASE_ANDROID_KEY_ALIAS`, and
+`PHASE_ANDROID_KEY_PASSWORD` (equivalent Gradle properties use the
+`phase.android.*` names in `app/build.gradle.kts`). The keystore path must name
+an existing file; secret values must be supplied through the build environment
+and are never committed.
+
+Android `versionCode` is derived strictly from `major.minor.patch` as
+`major * 1_000_000 + minor * 1_000 + patch`; minor and patch must each fit a
+three-digit slot and overflow is rejected (`0.60.0` maps to `60000`). Android
+supports APK delivery only (ARM64 and ARMv7): AAB/Play Store publishing and
+automatic updater manifests/keys are intentionally not supported. Desktop
+artifacts continue to use the existing signed `update.json` flow.
+
 ## Dedicated Server
 
 The easiest way to run a dedicated multiplayer server is the Docker image:

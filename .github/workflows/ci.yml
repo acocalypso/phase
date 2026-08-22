@@ -692,6 +692,92 @@ jobs:
         # need their own step or they'd never run in CI at all.
         run: cargo test --locked --manifest-path client/src-tauri/Cargo.toml
 
+  android-debug-apk:
+    name: Android debug APK (ARM64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: aarch64-linux-android
+          cache-shared-key: rust-tauri-android-arm64
+          cache-workspaces: client/src-tauri -> target
+
+      - name: Install pinned Android SDK and NDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;28.2.13676358"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+
+      - name: Install frozen client dependencies
+        run: cd client && pnpm install --frozen-lockfile
+
+      - name: Build ARM64 debug APK through the project CLI
+        run: |
+          set -euo pipefail
+          NODE_BIN=$(realpath "$(command -v node)")
+          TAURI_JS="$GITHUB_WORKSPACE/client/node_modules/@tauri-apps/cli/tauri.js"
+          test -f "$NODE_BIN"
+          test -x "$NODE_BIN"
+          test -f "$TAURI_JS"
+          export ORG_GRADLE_PROJECT_phaseNodeExecutable="$NODE_BIN"
+          "$NODE_BIN" "$TAURI_JS" android build --debug --target aarch64 --apk
+
+      - name: Inspect ARM64 debug APK
+        run: |
+          set -euo pipefail
+          APK=$(find client/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print -quit)
+          test -n "$APK"
+          test -f "$APK"
+
+          AAPT2="$ANDROID_HOME/build-tools/36.0.0/aapt2"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          BADGING=$($AAPT2 dump badging "$APK")
+          grep -F "package: name='rs.phase.app.debug' versionCode='60000' versionName='0.60.0'" <<<"$BADGING"
+          grep -F "sdkVersion:'24'" <<<"$BADGING"
+          grep -F "targetSdkVersion:'36'" <<<"$BADGING"
+
+          SIGNING=$($APKSIGNER verify --verbose --print-certs "$APK")
+          grep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' <<<"$SIGNING"
+          grep -F 'CN=Android Debug' <<<"$SIGNING"
+
+          mapfile -t ABIS < <(unzip -Z1 "$APK" | sed -nE 's#^lib/([^/]+)/.*\.so$#\1#p' | sort -u)
+          test "${#ABIS[@]}" -eq 1
+          test "${ABIS[0]}" = 'arm64-v8a'
+          if unzip -Z1 "$APK" | grep -Eq '(^|/)(update\.json|.*\.sig)$'; then
+            echo 'Android debug APK unexpectedly contains updater material'
+            exit 1
+          fi
+          cp "$APK" Phase-Android-ARM64-debug.apk
+
+      - name: Upload inspected Android debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-android-arm64-debug
+          path: Phase-Android-ARM64-debug.apk
+          retention-days: 14
+
   rust-check:
     name: Rust (fmt, clippy, test, coverage-gate)
     runs-on: ubuntu-latest
@@ -703,6 +789,7 @@ jobs:
       - draft-pools
       - wasm-check
       - tauri-check
+      - android-debug-apk
     if: always()
     steps:
       - name: Check split Rust jobs
@@ -713,8 +800,9 @@ jobs:
           DRAFT_POOLS_RESULT: ${{ needs.draft-pools.result }}
           WASM_RESULT: ${{ needs.wasm-check.result }}
           TAURI_RESULT: ${{ needs.tauri-check.result }}
+          ANDROID_RESULT: ${{ needs.android-debug-apk.result }}
         run: |
-          results="$RUST_LINT_RESULT $RUST_TEST_RESULT $CARD_DATA_RESULT $DRAFT_POOLS_RESULT $WASM_RESULT $TAURI_RESULT"
+          results="$RUST_LINT_RESULT $RUST_TEST_RESULT $CARD_DATA_RESULT $DRAFT_POOLS_RESULT $WASM_RESULT $TAURI_RESULT $ANDROID_RESULT"
           # `skipped` is a pass: draft-pools is main-only and is skipped on PRs.
           for result in $results; do
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
