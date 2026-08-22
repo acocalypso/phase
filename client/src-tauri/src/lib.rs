@@ -418,19 +418,37 @@ mod tests {
     fn capability_matrix_resolves_exact_local_remote_mobile_and_desktop_authority() {
         let capabilities: Vec<Value> =
             serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
-        assert_eq!(capabilities.len(), 3);
+        assert_eq!(capabilities.len(), 4);
         let identifiers: BTreeSet<_> = capabilities
             .iter()
             .map(|capability| capability["identifier"].as_str().unwrap())
             .collect();
         assert_eq!(
             identifiers,
-            BTreeSet::from(["default", "remote-shell-common", "remote-shell-desktop"])
+            BTreeSet::from([
+                "default",
+                "local-shell-desktop",
+                "remote-shell-common",
+                "remote-shell-desktop",
+            ])
         );
-        let local =
-            resolve_capabilities(&capabilities, true, "main", "asset://localhost/", "android");
-        assert_eq!(local.len(), 1);
-        assert_eq!(local[0]["identifier"], "default");
+        for platform in ["android", "iOS"] {
+            let local =
+                resolve_capabilities(&capabilities, true, "main", "asset://localhost/", platform);
+            assert_eq!(local.len(), 1);
+            assert_eq!(local[0]["identifier"], "default");
+            assert!(!capability_permissions(local[0]).contains("core:window:allow-set-fullscreen"));
+        }
+        for platform in ["linux", "macOS", "windows"] {
+            let local =
+                resolve_capabilities(&capabilities, true, "main", "asset://localhost/", platform);
+            assert_eq!(local.len(), 2);
+            let permissions: BTreeSet<_> = local
+                .iter()
+                .flat_map(|capability| capability_permissions(capability))
+                .collect();
+            assert!(permissions.contains("core:window:allow-set-fullscreen"));
+        }
         let trusted = "https://phase-rs.dev/game";
         for platform in ["android", "iOS"] {
             let resolved = resolve_capabilities(&capabilities, false, "main", trusted, platform);

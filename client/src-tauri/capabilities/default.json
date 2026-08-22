@@ -11,6 +11,13 @@
     ]
   },
   {
+    "identifier": "local-shell-desktop",
+    "description": "Desktop-only permissions for the bundled bootstrap page",
+    "platforms": ["linux", "macOS", "windows"],
+    "windows": ["main"],
+    "permissions": ["core:window:allow-set-fullscreen"]
+  },
+  {
     "identifier": "remote-shell-common",
     "description": "Mobile-safe remote permissions for first-party thin-shell content",
     "local": false,
