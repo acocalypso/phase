@@ -24,7 +24,11 @@ pub fn run() {
         std::env::set_var("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1");
     }
 
-    let builder = tauri::Builder::default().plugin(tauri_plugin_shell::init());
+    let builder = tauri::Builder::default().plugin(
+        tauri_plugin_opener::Builder::new()
+            .open_js_links_on_click(false)
+            .build(),
+    );
 
     #[cfg(desktop)]
     let builder = builder
@@ -370,7 +374,12 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .map(|value| value.as_str().unwrap())
+            .map(|value| {
+                value
+                    .as_str()
+                    .or_else(|| value["identifier"].as_str())
+                    .unwrap()
+            })
             .collect()
     }
 
@@ -419,6 +428,32 @@ mod tests {
         let capabilities: Vec<Value> =
             serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         assert_eq!(capabilities.len(), 4);
+        let expected_opener = json!({
+            "identifier": "opener:allow-open-url",
+            "allow": [{ "url": "http://*" }, { "url": "https://*" }]
+        });
+        for identifier in ["default", "remote-shell-common"] {
+            let capability = capabilities
+                .iter()
+                .find(|capability| capability["identifier"] == identifier)
+                .unwrap();
+            let grants: Vec<_> = capability["permissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|permission| permission["identifier"] == "opener:allow-open-url")
+                .collect();
+            assert_eq!(grants, vec![&expected_opener]);
+        }
+        let desktop_remote = capabilities
+            .iter()
+            .find(|capability| capability["identifier"] == "remote-shell-desktop")
+            .unwrap();
+        assert!(!capability_permissions(desktop_remote)
+            .iter()
+            .any(
+                |permission| permission.starts_with("opener:") || permission.starts_with("shell:")
+            ));
         let identifiers: BTreeSet<_> = capabilities
             .iter()
             .map(|capability| capability["identifier"].as_str().unwrap())

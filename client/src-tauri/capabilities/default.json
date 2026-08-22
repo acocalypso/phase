@@ -5,6 +5,10 @@
     "windows": ["main"],
     "permissions": [
       "core:default",
+      {
+        "identifier": "opener:allow-open-url",
+        "allow": [{ "url": "http://*" }, { "url": "https://*" }]
+      },
       "allow-stash-legacy-storage",
       "allow-host-platform",
       "allow-audio-boot-health"
@@ -31,7 +35,10 @@
     },
     "permissions": [
       "core:default",
-      "shell:allow-open",
+      {
+        "identifier": "opener:allow-open-url",
+        "allow": [{ "url": "http://*" }, { "url": "https://*" }]
+      },
       "allow-host-platform",
       "allow-set-channel-preference",
       "allow-take-legacy-storage",
