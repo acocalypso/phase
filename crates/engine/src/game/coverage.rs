@@ -1396,6 +1396,20 @@ fn fmt_quantity_ref(qty: &QuantityRef) -> String {
             ObjectScope::AmassedArmy => "amassed Army's power".into(),
             ObjectScope::BatchSource => "batch source's power".into(),
         },
+        QuantityRef::BasePower { scope } => match scope {
+            ObjectScope::Source | ObjectScope::Anaphoric | ObjectScope::Demonstrative => {
+                "self base power".into()
+            }
+            ObjectScope::Target => "target's base power".into(),
+            ObjectScope::Recipient => "recipient's base power".into(),
+            ObjectScope::EventSource => "event source's base power".into(),
+            ObjectScope::EventTarget => "event target's base power".into(),
+            ObjectScope::CostPaidObject => "referenced object's base power".into(),
+            ObjectScope::OtherRevealedCard => "other revealed card's base power".into(),
+            ObjectScope::OwnedLinkedExileCard => "owned linked-exiled card's base power".into(),
+            ObjectScope::AmassedArmy => "amassed Army's base power".into(),
+            ObjectScope::BatchSource => "batch source's base power".into(),
+        },
         QuantityRef::Toughness { scope } => match scope {
             ObjectScope::Source | ObjectScope::Anaphoric | ObjectScope::Demonstrative => {
                 "self toughness".into()
@@ -4201,9 +4215,13 @@ fn fmt_ability_condition(cond: &AbilityCondition) -> String {
         AbilityCondition::FirstCombatPhaseOfTurn => "first combat phase of the turn".into(),
         AbilityCondition::FirstEndStepOfTurn => "first end step of the turn".into(),
         AbilityCondition::CurrentPhaseIs { .. } => "current phase matches".into(),
-        AbilityCondition::ZoneChangedThisWay { filter } => {
-            format!("{} changed zones this way", fmt_target(filter))
-        }
+        AbilityCondition::ZoneChangedThisWay {
+            filter,
+            destination,
+        } => match destination {
+            Some(zone) => format!("{} was put into {zone:?} this way", fmt_target(filter)),
+            None => format!("{} changed zones this way", fmt_target(filter)),
+        },
         AbilityCondition::CostPaidObjectMatchesFilter { filter } => {
             format!("cost-paid object is {}", fmt_target(filter))
         }
@@ -8178,10 +8196,24 @@ fn quantity_ref_feature(qref: &QuantityRef) -> (&'static str, FeatureSupport) {
             ObjectScope::EventSource => ("EventSourcePower", Handled),
             ObjectScope::EventTarget => ("EventTargetPower", Handled),
             ObjectScope::CostPaidObject => ("CostPaidObjectPower", Handled),
-            ObjectScope::OtherRevealedCard => ("OtherRevealedCardPower", Handled),
-            ObjectScope::OwnedLinkedExileCard => ("OwnedLinkedExileCardPower", Handled),
+            ObjectScope::OtherRevealedCard => ("OtherRevealedCardPower", Unhandled),
+            ObjectScope::OwnedLinkedExileCard => ("OwnedLinkedExileCardPower", Unhandled),
             ObjectScope::AmassedArmy => ("AmassedArmyPower", Handled),
             ObjectScope::BatchSource => ("BatchSourcePower", Handled),
+        },
+        QuantityRef::BasePower { scope } => match scope {
+            ObjectScope::Source | ObjectScope::Anaphoric | ObjectScope::Demonstrative => {
+                ("SelfBasePower", Handled)
+            }
+            ObjectScope::Target => ("TargetBasePower", Handled),
+            ObjectScope::Recipient => ("RecipientBasePower", Handled),
+            ObjectScope::EventSource => ("EventSourceBasePower", Handled),
+            ObjectScope::EventTarget => ("EventTargetBasePower", Handled),
+            ObjectScope::CostPaidObject => ("CostPaidObjectBasePower", Handled),
+            ObjectScope::OtherRevealedCard => ("OtherRevealedCardBasePower", Unhandled),
+            ObjectScope::OwnedLinkedExileCard => ("OwnedLinkedExileCardBasePower", Unhandled),
+            ObjectScope::AmassedArmy => ("AmassedArmyBasePower", Handled),
+            ObjectScope::BatchSource => ("BatchSourceBasePower", Handled),
         },
         QuantityRef::Toughness { scope } => match scope {
             ObjectScope::Source | ObjectScope::Anaphoric | ObjectScope::Demonstrative => {
@@ -8192,8 +8224,8 @@ fn quantity_ref_feature(qref: &QuantityRef) -> (&'static str, FeatureSupport) {
             ObjectScope::EventSource => ("EventSourceToughness", Handled),
             ObjectScope::EventTarget => ("EventTargetToughness", Handled),
             ObjectScope::CostPaidObject => ("CostPaidObjectToughness", Handled),
-            ObjectScope::OtherRevealedCard => ("OtherRevealedCardToughness", Handled),
-            ObjectScope::OwnedLinkedExileCard => ("OwnedLinkedExileCardToughness", Handled),
+            ObjectScope::OtherRevealedCard => ("OtherRevealedCardToughness", Unhandled),
+            ObjectScope::OwnedLinkedExileCard => ("OwnedLinkedExileCardToughness", Unhandled),
             ObjectScope::AmassedArmy => ("AmassedArmyToughness", Handled),
             ObjectScope::BatchSource => ("BatchSourceToughness", Handled),
         },
@@ -13782,6 +13814,7 @@ mod tests {
                     source_object: None,
                     bypass_beneficiary: None,
                     protection_does_not_remove: None,
+                    room_door: None,
                 }],
                 duration: Some(Duration::UntilEndOfTurn),
                 target: None,
@@ -13831,6 +13864,7 @@ mod tests {
                     source_object: None,
                     bypass_beneficiary: None,
                     protection_does_not_remove: None,
+                    room_door: None,
                 }],
                 duration: Some(Duration::UntilEndOfTurn),
                 target: None,
@@ -15217,6 +15251,7 @@ mod tests {
             source_object: None,
             bypass_beneficiary: None,
             protection_does_not_remove: None,
+            room_door: None,
         });
 
         assert!(audit_card_lines(oracle, &face).is_empty());
@@ -15252,6 +15287,7 @@ mod tests {
             source_object: None,
             bypass_beneficiary: None,
             protection_does_not_remove: None,
+            room_door: None,
         });
 
         assert!(audit_card_lines(oracle, &face).is_empty());
@@ -15285,6 +15321,7 @@ mod tests {
             source_object: None,
             bypass_beneficiary: None,
             protection_does_not_remove: None,
+            room_door: None,
         });
 
         let findings = audit_card_lines(oracle, &face);
@@ -15467,6 +15504,7 @@ mod tests {
             (
                 AbilityCondition::ZoneChangedThisWay {
                     filter: TargetFilter::Any,
+                    destination: None,
                 },
                 "ZoneChangedThisWay",
             ),
@@ -15651,6 +15689,7 @@ mod tests {
             source_object: None,
             bypass_beneficiary: None,
             protection_does_not_remove: None,
+            room_door: None,
         });
 
         assert!(
@@ -15684,6 +15723,7 @@ mod tests {
             source_object: None,
             bypass_beneficiary: None,
             protection_does_not_remove: None,
+            room_door: None,
         });
 
         assert!(
@@ -15727,6 +15767,7 @@ mod tests {
             source_object: None,
             bypass_beneficiary: None,
             protection_does_not_remove: None,
+            room_door: None,
         });
 
         let gaps = card_face_gaps(&face);
@@ -15761,6 +15802,7 @@ mod tests {
             source_object: None,
             bypass_beneficiary: None,
             protection_does_not_remove: None,
+            room_door: None,
         });
 
         let gaps = card_face_gaps(&face);
@@ -15797,6 +15839,7 @@ mod tests {
             source_object: None,
             bypass_beneficiary: None,
             protection_does_not_remove: None,
+            room_door: None,
         });
 
         let gaps = card_face_gaps(&face);
@@ -15839,6 +15882,7 @@ mod tests {
                 source_object: None,
                 bypass_beneficiary: None,
                 protection_does_not_remove: None,
+                room_door: None,
             });
         }
 
@@ -16008,6 +16052,7 @@ mod tests {
             source_object: None,
             bypass_beneficiary: None,
             protection_does_not_remove: None,
+            room_door: None,
         });
 
         assert!(
