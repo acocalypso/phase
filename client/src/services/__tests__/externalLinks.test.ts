@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import capabilities from "../../../src-tauri/capabilities/default.json";
 
 const mocks = vi.hoisted(() => ({
   bundled: false,
@@ -16,7 +17,7 @@ vi.mock("@tauri-apps/plugin-opener", () => {
   return { openUrl: mocks.openUrl };
 });
 
-import { installTauriExternalLinkHandler } from "../externalLinks";
+import { FIRST_PARTY_ORIGINS, installTauriExternalLinkHandler } from "../externalLinks";
 
 function click(href: string, nested = false, init: MouseEventInit = {}): MouseEvent {
   const anchor = document.createElement("a");
@@ -43,9 +44,20 @@ afterEach(() => {
 });
 
 describe("Tauri document external-link routing", () => {
+  it("keeps first-party origins aligned with the remote capability manifest", () => {
+    const manifestOrigins = capabilities
+      .flatMap((capability) =>
+        "remote" in capability && capability.remote ? capability.remote.urls : [],
+      )
+      .map((url) => new URL(url.replace(/\*$/, "")).origin);
+
+    expect(new Set(manifestOrigins)).toEqual(FIRST_PARTY_ORIGINS);
+  });
+
   it.each([
     "https://",
     "//example.com/cards",
+    "\\\\example.com/cards",
     "file:///tmp/card.txt",
     "mailto:player@example.com",
     "tel:+123456",
@@ -82,6 +94,12 @@ describe("Tauri document external-link routing", () => {
     expect(event.defaultPrevented).toBe(true);
     await vi.waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith("https://example.com/cards"));
     expect(mocks.moduleLoaded).toHaveBeenCalledOnce();
+  });
+
+  it("normalizes a whitespace-prefixed external URL before routing it through opener", async () => {
+    const event = click(" https://evil.example/x");
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith("https://evil.example/x"));
   });
 
   it.each([

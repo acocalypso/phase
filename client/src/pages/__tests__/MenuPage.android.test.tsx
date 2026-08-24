@@ -14,7 +14,10 @@ vi.mock("../../components/chrome/PreviewBadge", () => ({ PreviewBadge: () => nul
 vi.mock("../../components/menu/LoadGameStateModal", () => ({ LoadGameStateModal: () => null }));
 vi.mock("../../components/menu/home/HomeDashboard", () => ({ HomeDashboard: () => null }));
 vi.mock("../../services/aiDeckCatalog", () => ({ buildLegalAiDeckCatalog: vi.fn() }));
-vi.mock("../../services/platform", () => ({ isDesktopTauri: mocks.desktop }));
+vi.mock("../../services/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../services/platform")>()),
+  isDesktopTauri: mocks.desktop,
+}));
 vi.mock("../../stores/gameStore", () => ({
   saveActiveGame: vi.fn(),
   saveGame: vi.fn(),

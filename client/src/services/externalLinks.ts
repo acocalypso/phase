@@ -8,7 +8,7 @@
 import { isOpenableExternalUrl } from "./openExternal";
 import { isBundledTauriOrigin, isTauri } from "./platform";
 
-const FIRST_PARTY_ORIGINS = new Set([
+export const FIRST_PARTY_ORIGINS = new Set([
   "https://phase-rs.dev",
   "https://app.phase-rs.dev",
   "https://preview.phase-rs.dev",
@@ -38,20 +38,38 @@ export function installTauriExternalLinkHandler(): void {
       const href = anchor.getAttribute("href");
       if (!href) return;
 
-      // React Router renders in-app navigation as ordinary relative anchors.
-      // Leave those (including query/hash-only links) to its bubble-phase
-      // handler. Protocol-relative URLs are external, not app routes, and must
-      // fail closed instead of inheriting the bundled origin's HTTP scheme.
-      const hasScheme = /^[A-Za-z][A-Za-z\d+.-]*:/.test(href);
-      if (!hasScheme && !href.startsWith("//")) return;
-      if (!isOpenableExternalUrl(href)) {
+      // Resolve exactly as the browser does before classifying the destination:
+      // it trims leading whitespace and treats backslashes as URL separators.
+      // Protocol-relative slash/backslash forms remain denied instead of
+      // inheriting the webview's scheme.
+      const normalizedHref = href.trim();
+      if (/^[\\/]{2}/.test(normalizedHref)) {
         event.preventDefault();
         return;
       }
-      if (!isBundledTauriOrigin() && FIRST_PARTY_ORIGINS.has(new URL(href).origin)) return;
+      let destination: URL;
+      try {
+        destination = new URL(normalizedHref, window.location.href);
+      } catch {
+        event.preventDefault();
+        return;
+      }
+
+      // React Router owns same-origin paths, queries, and fragments.
+      if (
+        destination.protocol === window.location.protocol &&
+        destination.host === window.location.host
+      ) {
+        return;
+      }
+      if (!isOpenableExternalUrl(destination.href)) {
+        event.preventDefault();
+        return;
+      }
+      if (!isBundledTauriOrigin() && FIRST_PARTY_ORIGINS.has(destination.origin)) return;
 
       event.preventDefault();
-      void openWithOpener(href).catch((err: unknown) => {
+      void openWithOpener(destination.href).catch((err: unknown) => {
         console.warn("[phase.rs] Failed to open external link via Tauri opener.", err);
       });
     },
