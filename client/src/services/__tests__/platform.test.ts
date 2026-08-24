@@ -81,17 +81,23 @@ describe("host platform latch", () => {
     expect(platform.isDesktopTauri()).toBe(false);
   });
 
-  it("permits only the exact missing-command fallback on a proven desktop UA", async () => {
+  it.each([
+    ["Windows", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"],
+    [
+      "macOS",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
+    ],
+    ["Linux", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"],
+  ])("uses proven %s desktop UA evidence after any legacy probe rejection", async (_os, userAgent) => {
     setTauri(true);
-    setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-    invokeMock.mockRejectedValue("Command host_platform not found");
+    setUserAgent(userAgent);
+    invokeMock.mockRejectedValue("Command host_platform not allowed by ACL");
     const platform = await loadPlatform();
     expect(await platform.initializeHostPlatform()).toBe("desktop");
     expect(platform.isDesktopTauri()).toBe(true);
   });
 
   it.each([
-    ["generic failure", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", 0],
     ["Command host_platform not found", "Mozilla/5.0 (Linux; Android 15)", 0],
     ["Command host_platform not found", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)", 5],
   ])("fails closed for error/UA ambiguity", async (error, userAgent, touchPoints) => {

@@ -755,8 +755,14 @@ jobs:
 
           AAPT2="$ANDROID_HOME/build-tools/36.0.0/aapt2"
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          TAURI_PROPERTIES="client/src-tauri/gen/android/app/tauri.properties"
+          test -f "$TAURI_PROPERTIES"
+          APP_VERSION=$(sed -n 's/^tauri.android.versionName=//p' "$TAURI_PROPERTIES")
+          VERSION_CODE=$(sed -n 's/^tauri.android.versionCode=//p' "$TAURI_PROPERTIES")
+          test -n "$APP_VERSION"
+          [[ "$VERSION_CODE" =~ ^[0-9]+$ ]]
           BADGING=$($AAPT2 dump badging "$APK")
-          grep -F "package: name='rs.phase.app.debug' versionCode='60000' versionName='0.60.0'" <<<"$BADGING"
+          grep -F "package: name='rs.phase.app.debug' versionCode='$VERSION_CODE' versionName='$APP_VERSION'" <<<"$BADGING"
           grep -F "minSdkVersion:'24'" <<<"$BADGING"
           grep -F "targetSdkVersion:'36'" <<<"$BADGING"
 
@@ -804,24 +810,14 @@ jobs:
           TAURI_RESULT: ${{ needs.tauri-check.result }}
           ANDROID_RESULT: ${{ needs.android-debug-apk.result }}
         run: |
-          required_results="$RUST_LINT_RESULT $RUST_TEST_RESULT $CARD_DATA_RESULT $WASM_RESULT $ANDROID_RESULT"
-          for result in $required_results; do
-            if [ "$result" != "success" ]; then
-              echo "One or more required split Rust jobs failed: $required_results"
+          results="$RUST_LINT_RESULT $RUST_TEST_RESULT $CARD_DATA_RESULT $DRAFT_POOLS_RESULT $WASM_RESULT $TAURI_RESULT $ANDROID_RESULT"
+          # `skipped` is a pass: draft-pools is main-only and is skipped on PRs.
+          for result in $results; do
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "One or more split Rust jobs failed: $results"
               exit 1
             fi
           done
-          # tauri-check is intentionally disabled above until Linux dependency
-          # setup is reliable; Android is still required to succeed.
-          if [ "$TAURI_RESULT" != "success" ] && [ "$TAURI_RESULT" != "skipped" ]; then
-            echo "Tauri check failed: $TAURI_RESULT"
-            exit 1
-          fi
-          # draft-pools is main-only, so it may be skipped on pull requests.
-          if [ "$DRAFT_POOLS_RESULT" != "success" ] && [ "$DRAFT_POOLS_RESULT" != "skipped" ]; then
-            echo "Draft pools job failed: $DRAFT_POOLS_RESULT"
-            exit 1
-          fi
 
   lobby-worker-test:
     name: Lobby worker (pnpm test)

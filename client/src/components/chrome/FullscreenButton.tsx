@@ -27,7 +27,7 @@ export function FullscreenButton({ variant }: FullscreenButtonProps) {
   const { t } = useTranslation();
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
   const desktopTauri = isDesktopTauri();
-  const mobileTauri = isTauri() && !desktopTauri;
+  const unknownOrMobileTauri = isTauri() && !desktopTauri;
 
   useEffect(() => {
     if (desktopTauri) {
@@ -67,14 +67,14 @@ export function FullscreenButton({ variant }: FullscreenButtonProps) {
       };
     }
 
-    if (mobileTauri) return;
+    if (unknownOrMobileTauri) return;
 
     function onChange() {
       setIsFullscreen(!!document.fullscreenElement);
     }
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
-  }, [desktopTauri, mobileTauri]);
+  }, [desktopTauri, unknownOrMobileTauri]);
 
   const toggle = useCallback(async () => {
     try {
@@ -87,7 +87,7 @@ export function FullscreenButton({ variant }: FullscreenButtonProps) {
         return;
       }
 
-      if (mobileTauri) return;
+      if (unknownOrMobileTauri) return;
 
       if (document.fullscreenElement) {
         await document.exitFullscreen();
@@ -97,12 +97,12 @@ export function FullscreenButton({ variant }: FullscreenButtonProps) {
     } catch (error) {
       console.warn("[phase.rs] Could not toggle fullscreen.", error);
     }
-  }, [desktopTauri, mobileTauri]);
+  }, [desktopTauri, unknownOrMobileTauri]);
 
   const Icon = isFullscreen ? ExitFullscreenIcon : EnterFullscreenIcon;
   const label = isFullscreen ? t("fullscreen.exit") : t("fullscreen.enter");
 
-  if (mobileTauri) return null;
+  if (unknownOrMobileTauri) return null;
 
   if (variant === "game") {
     return (

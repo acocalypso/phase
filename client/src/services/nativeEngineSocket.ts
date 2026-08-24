@@ -64,9 +64,11 @@ export class NativeEngineSocket {
     if (this.readyState !== NativeEngineSocket.OPEN || this.bridgeId === null) {
       throw new DOMException("WebSocket is not open.", "InvalidStateError");
     }
-    void this.invokeDesktop("native_engine_bridge_send", { id: this.bridgeId, text }).catch((error) => {
-      this.handleBridgeFailure(error);
-    });
+    void this.invokeDesktop("native_engine_bridge_send", { id: this.bridgeId, text }).catch(
+      (error) => {
+        this.handleBridgeFailure(error);
+      },
+    );
   }
 
   close(): void {
@@ -84,17 +86,15 @@ export class NativeEngineSocket {
 
   private async connect(): Promise<void> {
     try {
+      // Fail before Channel registers a Tauri callback that mobile cannot consume.
       if (!isDesktopTauri()) {
         throw new Error("Native engine bridge is available only in the desktop shell.");
       }
-      const { Channel, invoke } = await import("@tauri-apps/api/core");
-      if (!isDesktopTauri()) {
-        throw new Error("Native engine bridge is available only in the desktop shell.");
-      }
+      const { Channel } = await import("@tauri-apps/api/core");
       const channel = new Channel<BridgeEvent>((event) => {
         this.handleBridgeEvent(event);
       });
-      const bridgeId = await invoke<number>("connect_native_engine", {
+      const bridgeId = await this.invokeDesktop<number>("connect_native_engine", {
         onEvent: channel,
       });
       this.bridgeId = bridgeId;
@@ -129,9 +129,6 @@ export class NativeEngineSocket {
       throw new Error("Native engine bridge is available only in the desktop shell.");
     }
     const { invoke } = await import("@tauri-apps/api/core");
-    if (!isDesktopTauri()) {
-      throw new Error("Native engine bridge is available only in the desktop shell.");
-    }
     return invoke<T>(command, args);
   }
 

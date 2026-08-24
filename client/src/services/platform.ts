@@ -13,10 +13,6 @@ function isHostPlatform(value: unknown): value is HostPlatform {
   return value === "desktop" || value === "android" || value === "ios";
 }
 
-function isMissingHostPlatformCommand(error: unknown): boolean {
-  return error === "Command host_platform not found";
-}
-
 function hasProvenDesktopUserAgent(): boolean {
   if (typeof navigator === "undefined") return false;
   const userAgent = navigator.userAgent;
@@ -29,9 +25,11 @@ function hasProvenDesktopUserAgent(): boolean {
 
 /**
  * Resolve the shell platform exactly once, before any platform-sensitive code
- * is allowed to run. Unknown results fail closed. The legacy fallback exists
- * only for pre-command desktop shells whose error and user agent are both
- * unambiguous.
+ * is allowed to run. Unknown successful results fail closed. When the probe is
+ * rejected by a pre-command/pre-permission desktop shell, the legacy fallback
+ * relies only on unambiguous desktop user-agent evidence; Tauri's rejection
+ * text is not a stable API and differs depending on whether ACL or dispatch
+ * rejects the command first.
  */
 export function initializeHostPlatform(): Promise<HostPlatform | null> {
   if (platformPromise) return platformPromise;
@@ -42,10 +40,8 @@ export function initializeHostPlatform(): Promise<HostPlatform | null> {
       const { invoke } = await import("@tauri-apps/api/core");
       const result = await invoke<unknown>("host_platform");
       return isHostPlatform(result) ? result : null;
-    } catch (error) {
-      return isMissingHostPlatformCommand(error) && hasProvenDesktopUserAgent()
-        ? "desktop"
-        : null;
+    } catch {
+      return hasProvenDesktopUserAgent() ? "desktop" : null;
     }
   })().then((result) => {
     platform = result;

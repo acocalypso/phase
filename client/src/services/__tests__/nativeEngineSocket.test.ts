@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { ChannelMock, emitChannelEvent, invokeMock, isDesktopTauriMock, resetChannelMock } = vi.hoisted(() => {
+const { ChannelMock, channelConstructMock, emitChannelEvent, invokeMock, isDesktopTauriMock, resetChannelMock } = vi.hoisted(() => {
   let listener: ((event: unknown) => void) | undefined;
+  const channelConstructMock = vi.fn();
 
   class ChannelMock<T> {
     constructor(callback: (event: T) => void) {
+      channelConstructMock();
       listener = callback as (event: unknown) => void;
     }
   }
 
   return {
     ChannelMock,
+    channelConstructMock,
     emitChannelEvent(event: unknown) {
       listener?.(event);
     },
@@ -71,6 +74,7 @@ describe("NativeEngineSocket", () => {
     await vi.waitFor(() => expect(socket.readyState).toBe(NativeEngineSocket.CLOSED));
 
     expect(events).toEqual(["error", "close"]);
+    expect(channelConstructMock).not.toHaveBeenCalled();
     expect(invokeMock).not.toHaveBeenCalled();
   });
 

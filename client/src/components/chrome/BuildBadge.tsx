@@ -70,12 +70,7 @@ export function BuildBadge({ className = "", inline = false, compact = false }: 
   }, [isRemoteTauriShell]);
 
   const handleCheckUpdate = () => {
-    if (isDesktopTauri()) {
-      checkForTauriUpdate();
-      if (isBundledTauriOrigin()) return;
-      checkForServiceWorkerUpdate();
-      return;
-    }
+    if (isDesktopTauri()) checkForTauriUpdate();
     if (!isTauri() || !isBundledTauriOrigin()) checkForServiceWorkerUpdate();
   };
 

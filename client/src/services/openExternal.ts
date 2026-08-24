@@ -1,5 +1,14 @@
-import { isOpenableExternalUrl } from "./externalLinks";
 import { isTauri } from "./platform";
+
+/** The single URL authority for document and direct external-link routing. */
+export function isOpenableExternalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 /** Open a validated HTTP(S) URL in the user's default browser. */
 export function openExternal(url: string): void {

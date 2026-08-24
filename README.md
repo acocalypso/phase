@@ -153,9 +153,11 @@ export ORG_GRADLE_PROJECT_phaseNodeExecutable="$NODE_BIN"
 
 The generated Android project is checked in at `client/src-tauri/gen/android`
 and its Gradle/Rust integration is maintained by the repository. Do not run
-`android init` during normal development: regeneration is supported only by a
-documented deterministic reapply process that restores and verifies the
-maintained integration.
+`android init` during normal development. If a Tauri upgrade requires
+regeneration, do it on a throwaway branch, review the complete generated diff,
+and explicitly preserve the signing/version guards in `app/build.gradle.kts`.
+The Rust test `generated_android_gradle_keeps_release_invariants` fails if those
+load-bearing edits are lost.
 
 Debug APKs are written below
 `client/src-tauri/gen/android/app/build/outputs/apk/`. Install and cold-launch
@@ -173,12 +175,15 @@ local signing inputs are nonempty: `PHASE_ANDROID_KEYSTORE_FILE`,
 `PHASE_ANDROID_KEYSTORE_PASSWORD`, `PHASE_ANDROID_KEY_ALIAS`, and
 `PHASE_ANDROID_KEY_PASSWORD` (equivalent Gradle properties use the
 `phase.android.*` names in `app/build.gradle.kts`). The local keystore path must
-name an existing file. CI instead requires the `ANDROID_KEYSTORE_BASE64`,
+name an existing file. CI builds release APKs when all five Android secrets are
+configured, skips APK attachment when none are configured, and fails on a
+partial configuration without blocking publication of the desktop release.
+The required secret names are `ANDROID_KEYSTORE_BASE64`,
 `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`
-secrets; it decodes the first into a runner-local keystore and maps the other
-three to the Gradle inputs. CI also requires the protected
-`ANDROID_CERTIFICATE_SHA256` secret and verifies that both APKs use that exact
-release certificate. Secret values are never committed.
+plus `ANDROID_CERTIFICATE_SHA256`. CI decodes the first into a runner-local
+keystore, maps the next three to the Gradle inputs, and verifies that both APKs
+use the certificate identified by the final digest. Secret values are never
+committed.
 
 Android `versionCode` is derived strictly from `major.minor.patch` as
 `major * 1_000_000 + minor * 1_000 + patch`; minor and patch must each fit a

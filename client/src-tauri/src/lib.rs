@@ -239,7 +239,7 @@ mod tests {
         let raw = include_str!("../tauri.conf.json");
         let config: tauri::Config = serde_json::from_str(raw).unwrap();
         assert_eq!(config.identifier, "rs.phase.app");
-        assert_eq!(config.version.as_deref(), Some("0.60.0"));
+        assert_eq!(config.version.as_deref(), Some(env!("CARGO_PKG_VERSION")));
         assert_eq!(
             config.bundle.create_updater_artifacts,
             tauri::utils::config::Updater::Bool(true)
@@ -265,12 +265,13 @@ mod tests {
     fn installed_android_config_schema_admits_only_the_four_real_properties() {
         let schema_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../node_modules/@tauri-apps/cli/config.schema.json");
-        let raw = fs::read_to_string(&schema_path).unwrap_or_else(|error| {
-            panic!(
-                "failed to read installed Tauri config schema at {}; run the frontend dependency install first: {error}",
+        let Ok(raw) = fs::read_to_string(&schema_path) else {
+            eprintln!(
+                "skipping installed schema assertions because {} is absent; run the frontend dependency install first",
                 schema_path.display()
-            )
-        });
+            );
+            return;
+        };
         let schema: Value = serde_json::from_str(&raw).unwrap();
         let android = &schema["definitions"]["AndroidConfig"];
         let properties = android["properties"].as_object().unwrap();
@@ -298,6 +299,29 @@ mod tests {
         assert!(overlay["bundle"]["android"]
             .get("targetSdkVersion")
             .is_none());
+    }
+
+    #[test]
+    fn generated_android_gradle_keeps_release_invariants() {
+        let gradle = include_str!("../gen/android/app/build.gradle.kts");
+        for required in [
+            "fun strictAndroidVersionCode(version: String): Int",
+            "val androidVersionCode = strictAndroidVersionCode(androidVersionName)",
+            "signingConfigs {",
+            "create(\"release\")",
+            "signingConfig = signingConfigs.getByName(\"release\")",
+            "tasks.configureEach",
+            "Missing required Android release signing inputs",
+            "PHASE_ANDROID_KEYSTORE_FILE",
+            "PHASE_ANDROID_KEYSTORE_PASSWORD",
+            "PHASE_ANDROID_KEY_ALIAS",
+            "PHASE_ANDROID_KEY_PASSWORD",
+        ] {
+            assert!(
+                gradle.contains(required),
+                "generated Android Gradle integration lost required invariant: {required}"
+            );
+        }
     }
 
     #[test]
@@ -341,11 +365,11 @@ mod tests {
             ),
             (
                 "duplicate version",
-                Box::new(|v| v["version"] = json!("0.60.0")),
+                Box::new(|v| v["version"] = json!(env!("CARGO_PKG_VERSION"))),
             ),
             (
                 "duplicate versionCode",
-                Box::new(|v| v["bundle"]["android"]["versionCode"] = json!(60000)),
+                Box::new(|v| v["bundle"]["android"]["versionCode"] = json!(1)),
             ),
             (
                 "invent targetSdkVersion",
@@ -392,48 +416,8 @@ mod tests {
             .collect()
     }
 
-    fn resolve_capabilities<'a>(
-        capabilities: &'a [Value],
-        local: bool,
-        window: &str,
-        origin: &str,
-        platform: &str,
-    ) -> Vec<&'a Value> {
-        capabilities
-            .iter()
-            .filter(|capability| {
-                let local_enabled = capability
-                    .get("local")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true);
-                let origin_matches = if local {
-                    local_enabled
-                } else {
-                    capability["remote"]["urls"].as_array().is_some_and(|urls| {
-                        urls.iter().any(|url| {
-                            url.as_str()
-                                .and_then(|pattern| pattern.strip_suffix('*'))
-                                .is_some_and(|prefix| origin.starts_with(prefix))
-                        })
-                    })
-                };
-                origin_matches
-                    && capability["windows"]
-                        .as_array()
-                        .is_some_and(|windows| windows.iter().any(|value| value == window))
-                    && capability.get("platforms").is_none_or(|platforms| {
-                        platforms
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .any(|value| value == platform)
-                    })
-            })
-            .collect()
-    }
-
     #[test]
-    fn capability_matrix_resolves_exact_local_remote_mobile_and_desktop_authority() {
+    fn capability_manifest_declares_exact_mobile_and_desktop_authority() {
         let capabilities: Vec<Value> =
             serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         assert_eq!(capabilities.len(), 4);
@@ -476,85 +460,80 @@ mod tests {
                 "remote-shell-desktop",
             ])
         );
-        for platform in ["android", "iOS"] {
-            let local =
-                resolve_capabilities(&capabilities, true, "main", "asset://localhost/", platform);
-            assert_eq!(local.len(), 1);
-            assert_eq!(local[0]["identifier"], "default");
-            assert!(!capability_permissions(local[0]).contains("core:window:allow-set-fullscreen"));
-        }
-        for platform in ["linux", "macOS", "windows"] {
-            let local =
-                resolve_capabilities(&capabilities, true, "main", "asset://localhost/", platform);
-            assert_eq!(local.len(), 2);
-            let permissions: BTreeSet<_> = local
+        let find = |identifier: &str| {
+            capabilities
                 .iter()
-                .flat_map(|capability| capability_permissions(capability))
-                .collect();
-            for required in [
-                "core:window:allow-set-fullscreen",
-                "process:allow-exit",
-                "process:allow-restart",
-                "updater:default",
-            ] {
-                assert!(
-                    permissions.contains(required),
-                    "missing {required} on local {platform}"
-                );
+                .find(|capability| capability["identifier"] == identifier)
+                .unwrap()
+        };
+        let common_local = find("default");
+        let desktop_local = find("local-shell-desktop");
+        let common_remote = find("remote-shell-common");
+        let desktop_remote = find("remote-shell-desktop");
+
+        for capability in [common_local, desktop_local, common_remote, desktop_remote] {
+            assert_eq!(capability["windows"], json!(["main"]));
+        }
+        assert!(common_local.get("platforms").is_none());
+        assert!(common_local.get("local").is_none());
+        assert!(desktop_local.get("local").is_none());
+        assert_eq!(
+            desktop_local["platforms"],
+            json!(["linux", "macOS", "windows"])
+        );
+
+        let trusted_origins = json!([
+            "https://phase-rs.dev/*",
+            "https://app.phase-rs.dev/*",
+            "https://preview.phase-rs.dev/*"
+        ]);
+        for capability in [common_remote, desktop_remote] {
+            assert_eq!(capability["local"], false);
+            assert_eq!(capability["remote"]["urls"], trusted_origins);
+        }
+        assert!(common_remote.get("platforms").is_none());
+        assert_eq!(
+            desktop_remote["platforms"],
+            json!(["linux", "macOS", "windows"])
+        );
+
+        let desktop_permissions = BTreeSet::from([
+            "core:window:allow-set-fullscreen",
+            "process:allow-exit",
+            "process:allow-restart",
+            "updater:default",
+        ]);
+        assert_eq!(capability_permissions(desktop_local), desktop_permissions);
+        assert_eq!(capability_permissions(desktop_remote), desktop_permissions);
+        for capability in [common_local, common_remote] {
+            let permissions = capability_permissions(capability);
+            assert!(!permissions.contains("core:window:allow-set-fullscreen"));
+            assert!(!permissions.contains("process:allow-exit"));
+            assert!(!permissions.contains("process:allow-restart"));
+            assert!(!permissions.contains("updater:default"));
+        }
+        for required in [
+            "allow-host-platform",
+            "allow-ensure-native-engine",
+            "allow-connect-native-engine",
+        ] {
+            assert!(capability_permissions(common_remote).contains(required));
+        }
+
+        let acl_manifests: Value =
+            serde_json::from_str(include_str!("../gen/schemas/acl-manifests.json")).unwrap();
+        let app_permissions = acl_manifests["__app-acl__"]["permissions"]
+            .as_object()
+            .unwrap();
+        for capability in [common_local, common_remote] {
+            for permission in capability_permissions(capability) {
+                if permission.starts_with("allow-") {
+                    assert!(
+                        app_permissions.contains_key(permission),
+                        "unknown application permission {permission}"
+                    );
+                }
             }
         }
-        let trusted = "https://phase-rs.dev/game";
-        for platform in ["android", "iOS"] {
-            let resolved = resolve_capabilities(&capabilities, false, "main", trusted, platform);
-            assert_eq!(resolved.len(), 1);
-            assert_eq!(resolved[0]["identifier"], "remote-shell-common");
-            let permissions = capability_permissions(resolved[0]);
-            for required in [
-                "allow-host-platform",
-                "allow-ensure-native-engine",
-                "allow-connect-native-engine",
-            ] {
-                assert!(permissions.contains(required));
-            }
-            for forbidden in [
-                "updater:default",
-                "process:allow-exit",
-                "process:allow-restart",
-                "core:window:allow-set-fullscreen",
-            ] {
-                assert!(!permissions.contains(forbidden));
-            }
-        }
-        for platform in ["linux", "macOS", "windows"] {
-            let resolved = resolve_capabilities(&capabilities, false, "main", trusted, platform);
-            assert_eq!(resolved.len(), 2);
-            let permissions: BTreeSet<_> = resolved
-                .iter()
-                .flat_map(|capability| capability_permissions(capability))
-                .collect();
-            for required in [
-                "allow-host-platform",
-                "allow-ensure-native-engine",
-                "allow-connect-native-engine",
-                "updater:default",
-                "process:allow-exit",
-                "process:allow-restart",
-                "core:window:allow-set-fullscreen",
-            ] {
-                assert!(
-                    permissions.contains(required),
-                    "missing {required} on {platform}"
-                );
-            }
-        }
-        assert!(resolve_capabilities(
-            &capabilities,
-            false,
-            "main",
-            "https://evil.example/",
-            "android"
-        )
-        .is_empty());
-        assert!(resolve_capabilities(&capabilities, false, "wrong", trusted, "android").is_empty());
     }
 }

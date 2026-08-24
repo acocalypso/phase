@@ -330,35 +330,69 @@ jobs:
     timeout-minutes: 35
     permissions:
       contents: read
+    outputs:
+      apk_available: ${{ steps.android-artifacts.outputs.available }}
     env:
       RELEASE_SHA: ${{ needs.resolve-shell-ref.outputs.release_sha }}
       SHELL_VERSION: ${{ needs.resolve-shell-ref.outputs.shell_version }}
     steps:
+      - name: Detect Android signing configuration
+        id: android-signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_CERTIFICATE_SHA256: ${{ secrets.ANDROID_CERTIFICATE_SHA256 }}
+        run: |
+          set -euo pipefail
+          present=0
+          for variable in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD ANDROID_CERTIFICATE_SHA256; do
+            if [ -n "${!variable}" ]; then present=$((present + 1)); fi
+          done
+          if [ "$present" -eq 0 ]; then
+            echo '::notice::Android signing is not configured; desktop release will continue without APKs'
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$present" -ne 5 ]; then
+            echo '::error::Android signing is partially configured; provide all five Android secrets or none'
+            exit 1
+          fi
+          echo 'available=true' >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        if: steps.android-signing.outputs.available == 'true'
         with:
           ref: ${{ env.RELEASE_SHA }}
 
       - uses: pnpm/action-setup@v4
+        if: steps.android-signing.outputs.available == 'true'
         with:
           version: 9.15.9
 
       - uses: actions/setup-node@v4
+        if: steps.android-signing.outputs.available == 'true'
         with:
           node-version: 22
 
       - uses: actions/setup-java@v4
+        if: steps.android-signing.outputs.available == 'true'
         with:
           distribution: temurin
           java-version: 17
 
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        if: steps.android-signing.outputs.available == 'true'
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        if: steps.android-signing.outputs.available == 'true'
         with:
           target: aarch64-linux-android,armv7-linux-androideabi
           cache: false
 
       - name: Install pinned Android SDK and NDK
+        if: steps.android-signing.outputs.available == 'true'
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
@@ -369,6 +403,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
       - name: Stamp shell version
+        if: steps.android-signing.outputs.available == 'true'
         run: |
           node <<'NODE'
           const fs = require("node:fs");
@@ -391,32 +426,8 @@ jobs:
           fs.writeFileSync(lockPath, lock.replace(lockPattern, `$1${version}$2`));
           NODE
 
-      - name: Validate strict Android version mapping
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import os
-          import re
-
-          def android_version_code(version: str) -> int:
-              match = re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version)
-              if match is None:
-                  raise ValueError(f"Android version must be strict major.minor.patch: {version!r}")
-              major, minor, patch = map(int, match.groups())
-              if minor > 999 or patch > 999:
-                  raise ValueError("Android minor and patch versions must fit three-digit slots")
-              code = major * 1_000_000 + minor * 1_000 + patch
-              if code > 2_147_483_647:
-                  raise ValueError("Android versionCode exceeds the signed 32-bit limit")
-              return code
-
-          assert android_version_code("0.60.0") == 60_000
-          code = android_version_code(os.environ["SHELL_VERSION"])
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              env_file.write(f"ANDROID_VERSION_CODE={code}\n")
-          PY
-
       - name: Configure fail-closed Android signing
+        if: steps.android-signing.outputs.available == 'true'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           PHASE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -433,9 +444,11 @@ jobs:
           chmod 600 "$KEYSTORE_FILE"
 
       - name: Install frozen client dependencies
+        if: steps.android-signing.outputs.available == 'true'
         run: cd client && pnpm install --frozen-lockfile
 
       - name: Build signed ARM64 and ARMv7 APKs through the project CLI
+        if: steps.android-signing.outputs.available == 'true'
         env:
           PHASE_ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/phase-android-release.jks
           PHASE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -452,6 +465,7 @@ jobs:
           "$NODE_BIN" "$TAURI_JS" android build --target aarch64 armv7 --split-per-abi --apk
 
       - name: Inspect and stage signed Android APKs
+        if: steps.android-signing.outputs.available == 'true'
         env:
           ANDROID_CERTIFICATE_SHA256: ${{ secrets.ANDROID_CERTIFICATE_SHA256 }}
         run: |
@@ -473,6 +487,13 @@ jobs:
           test -n "$ARM64_APK"
           test -n "$ARMV7_APK"
 
+          TAURI_PROPERTIES='client/src-tauri/gen/android/app/tauri.properties'
+          test -f "$TAURI_PROPERTIES"
+          TAURI_VERSION_NAME=$(sed -n 's/^tauri.android.versionName=//p' "$TAURI_PROPERTIES")
+          TAURI_VERSION_CODE=$(sed -n 's/^tauri.android.versionCode=//p' "$TAURI_PROPERTIES")
+          test "$TAURI_VERSION_NAME" = "$SHELL_VERSION"
+          [[ "$TAURI_VERSION_CODE" =~ ^[0-9]+$ ]]
+
           expected_digest=$(printf '%s' "${ANDROID_CERTIFICATE_SHA256:-}" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')
           if ! [[ "$expected_digest" =~ ^[0-9A-F]{64}$ ]]; then
             echo '::error::ANDROID_CERTIFICATE_SHA256 must be the protected release certificate SHA-256 digest'
@@ -481,7 +502,7 @@ jobs:
           signer_digest=''
           for apk in "$ARM64_APK" "$ARMV7_APK"; do
             BADGING=$($AAPT2 dump badging "$apk")
-            grep -F "package: name='rs.phase.app' versionCode='$ANDROID_VERSION_CODE' versionName='$SHELL_VERSION'" <<<"$BADGING"
+            grep -F "package: name='rs.phase.app' versionCode='$TAURI_VERSION_CODE' versionName='$SHELL_VERSION'" <<<"$BADGING"
             grep -F "minSdkVersion:'24'" <<<"$BADGING"
             grep -F "targetSdkVersion:'36'" <<<"$BADGING"
             SIGNING=$($APKSIGNER verify --verbose --print-certs "$apk")
@@ -499,15 +520,31 @@ jobs:
           cp "$ARMV7_APK" staging/Phase-Android-ARMv7.apk
 
       - name: Upload signed Android artifacts
+        id: upload-android-artifacts
+        if: steps.android-signing.outputs.available == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: shell-tauri-android
           path: staging/*.apk
           retention-days: 90
 
+      - name: Record signed Android artifact availability
+        id: android-artifacts
+        if: always()
+        env:
+          SIGNING_AVAILABLE: ${{ steps.android-signing.outputs.available }}
+          UPLOAD_OUTCOME: ${{ steps.upload-android-artifacts.outcome }}
+        run: |
+          if [ "$SIGNING_AVAILABLE" = 'true' ] && [ "$UPLOAD_OUTCOME" = 'success' ]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+          fi
+
   release-shell:
     name: Create Shell Release
     needs: [resolve-shell-ref, build-shell, build-android]
+    if: ${{ always() && needs.resolve-shell-ref.result == 'success' && needs.build-shell.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -546,9 +583,6 @@ jobs:
           LINUX_PAYLOAD=$(first_match "artifacts/shell-tauri-linux/Phase-Desktop-Linux-x86_64.AppImage")
           MACOS_PAYLOAD=$(first_match "artifacts/shell-tauri-macos/Phase-Desktop-macOS-Apple-Silicon.app.tar.gz")
           WINDOWS_PAYLOAD=$(first_match "artifacts/shell-tauri-windows/Phase-Desktop-Windows-x64-Setup.exe")
-          ANDROID_ARM64=$(first_match "artifacts/shell-tauri-android/Phase-Android-ARM64.apk")
-          ANDROID_ARMV7=$(first_match "artifacts/shell-tauri-android/Phase-Android-ARMv7.apk")
-
           LINUX_SIG=""
           MACOS_SIG=""
           WINDOWS_SIG=""
@@ -560,8 +594,6 @@ jobs:
           if [ -z "$LINUX_PAYLOAD" ] || [ -z "$LINUX_SIG" ]; then echo "::error::Missing Linux updater payload/signature"; missing=1; fi
           if [ -z "$MACOS_PAYLOAD" ] || [ -z "$MACOS_SIG" ]; then echo "::error::Missing macOS updater payload/signature"; missing=1; fi
           if [ -z "$WINDOWS_PAYLOAD" ] || [ -z "$WINDOWS_SIG" ]; then echo "::error::Missing Windows updater payload/signature"; missing=1; fi
-          if [ -z "$ANDROID_ARM64" ]; then echo "::error::Missing Android ARM64 APK"; missing=1; fi
-          if [ -z "$ANDROID_ARMV7" ]; then echo "::error::Missing Android ARMv7 APK"; missing=1; fi
           [ "$missing" = "0" ]
 
           PLATFORMS="{"
@@ -594,8 +626,7 @@ jobs:
             - **Windows:** `Phase-Desktop-Windows-x64-Setup.exe`
             - **macOS (Apple Silicon):** `Phase-Desktop-macOS-Apple-Silicon.dmg`
             - **Linux:** `Phase-Desktop-Linux-x86_64.deb` or `Phase-Desktop-Linux-x86_64.AppImage`
-            - **Android ARM64:** `Phase-Android-ARM64.apk`
-            - **Android ARMv7:** `Phase-Android-ARMv7.apk`
+            - **Android:** ARM64 and ARMv7 APKs are attached when release signing is configured.
 
             This is the official desktop app for [phase-rs.dev](https://phase-rs.dev).
             `update.json` is used by automatic updates; it is not a manual download.
@@ -606,6 +637,15 @@ jobs:
             artifacts/shell-tauri-macos/Phase-Desktop-macOS-Apple-Silicon.dmg
             artifacts/shell-tauri-macos/Phase-Desktop-macOS-Apple-Silicon.app.tar.gz
             artifacts/shell-tauri-windows/Phase-Desktop-Windows-x64-Setup.exe
-            artifacts/shell-tauri-android/Phase-Android-ARM64.apk
-            artifacts/shell-tauri-android/Phase-Android-ARMv7.apk
             artifacts/update.json
+
+      - name: Attach signed Android APKs
+        if: needs.build-android.outputs.apk_available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$SHELL_TAG" \
+            artifacts/shell-tauri-android/Phase-Android-ARM64.apk \
+            artifacts/shell-tauri-android/Phase-Android-ARMv7.apk \
+            --clobber

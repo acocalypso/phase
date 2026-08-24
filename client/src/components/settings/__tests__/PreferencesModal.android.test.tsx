@@ -1,9 +1,35 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-it("renders the native-engine preference only behind desktop platform proof", () => {
-  const source = readFileSync(resolve("src/components/settings/PreferencesModal.tsx"), "utf8");
-  expect(source).toContain("{isDesktopTauri() && (");
-  expect(source).not.toContain("{isTauri() && (");
+const { desktop } = vi.hoisted(() => ({ desktop: vi.fn() }));
+
+vi.mock("../../../services/platform", () => ({ isDesktopTauri: desktop }));
+vi.mock("../../../services/backup", () => ({
+  downloadBackup: vi.fn(),
+  importBackupFromFile: vi.fn(),
+}));
+
+import { usePreferencesStore } from "../../../stores/preferencesStore";
+import { PreferencesModal } from "../PreferencesModal";
+
+beforeEach(() => {
+  desktop.mockReturnValue(false);
+  usePreferencesStore.setState({ nativeEngineEnabled: false });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+it("renders and updates the native-engine preference only on a proven desktop shell", () => {
+  const view = render(<PreferencesModal onClose={vi.fn()} initialTab="gameplay" />);
+  expect(screen.queryByText("Native engine")).not.toBeInTheDocument();
+
+  desktop.mockReturnValue(true);
+  view.rerender(<PreferencesModal onClose={vi.fn()} initialTab="gameplay" />);
+  const checkbox = screen.getByRole("checkbox", { name: /native engine/i });
+  fireEvent.click(checkbox);
+
+  expect(usePreferencesStore.getState().nativeEngineEnabled).toBe(true);
 });

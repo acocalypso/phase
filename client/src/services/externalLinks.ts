@@ -1,7 +1,11 @@
-// External link routing for Tauri. A capture-phase document handler covers
-// nested content in existing and future anchors while preserving first-party
-// navigation inside remote-origin shells.
+// Tauri webviews silently swallow target=_blank links, so one capture-phase
+// handler covers nested content in every current and future anchor without
+// per-callsite handlers. Modifier clicks intentionally follow the same path:
+// "open in new tab" has no useful meaning inside a webview. Relative app links
+// remain with the router; explicit non-HTTP(S) schemes and protocol-relative
+// URLs are denied before they can reach the shell.
 
+import { isOpenableExternalUrl } from "./openExternal";
 import { isBundledTauriOrigin, isTauri } from "./platform";
 
 const FIRST_PARTY_ORIGINS = new Set([
@@ -11,16 +15,6 @@ const FIRST_PARTY_ORIGINS = new Set([
 ]);
 
 let handlerInstalled = false;
-
-/** The single URL authority for document and direct external-link routing. */
-export function isOpenableExternalUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 async function openWithOpener(url: string): Promise<void> {
   const { openUrl } = await import("@tauri-apps/plugin-opener");
