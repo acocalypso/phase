@@ -325,6 +325,76 @@ mod tests {
     }
 
     #[test]
+    fn generated_android_launcher_uses_exact_phase_brand_assets() {
+        fn png_dimensions(bytes: &[u8]) -> (u32, u32) {
+            assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+            assert_eq!(&bytes[12..16], b"IHDR");
+            (
+                u32::from_be_bytes(bytes[16..20].try_into().unwrap()),
+                u32::from_be_bytes(bytes[20..24].try_into().unwrap()),
+            )
+        }
+
+        fn fnv1a64(bytes: &[u8]) -> u64 {
+            bytes.iter().fold(0xcbf29ce484222325, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+            })
+        }
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("gen/android/app/src/main");
+        let launchers = [
+            ("res/mipmap-mdpi/ic_launcher.png", 48, 0x5c1ab8a4b9388839),
+            ("res/mipmap-mdpi/ic_launcher_round.png", 48, 0x59147ebcc4d03aee),
+            ("res/mipmap-mdpi/ic_launcher_foreground.png", 108, 0x7475638e0402146d),
+            ("res/mipmap-hdpi/ic_launcher.png", 72, 0x6617db678c75ce93),
+            ("res/mipmap-hdpi/ic_launcher_round.png", 72, 0x4f89bf39172434e8),
+            ("res/mipmap-hdpi/ic_launcher_foreground.png", 162, 0x117a6af2e6fc0ba6),
+            ("res/mipmap-xhdpi/ic_launcher.png", 96, 0x093ba5f2f7965ec2),
+            ("res/mipmap-xhdpi/ic_launcher_round.png", 96, 0x4b3df36bd3042bc2),
+            ("res/mipmap-xhdpi/ic_launcher_foreground.png", 216, 0xf53f6d79f95ca531),
+            ("res/mipmap-xxhdpi/ic_launcher.png", 144, 0xff0c47390df3221d),
+            ("res/mipmap-xxhdpi/ic_launcher_round.png", 144, 0xd35d38485496323b),
+            ("res/mipmap-xxhdpi/ic_launcher_foreground.png", 324, 0x67326e67177dc7d1),
+            ("res/mipmap-xxxhdpi/ic_launcher.png", 192, 0x8392d43e0239107d),
+            ("res/mipmap-xxxhdpi/ic_launcher_round.png", 192, 0x1d2a7149b7716eff),
+            ("res/mipmap-xxxhdpi/ic_launcher_foreground.png", 432, 0x361ec69b50f865b4),
+        ];
+        for (relative, expected_size, expected_hash) in launchers {
+            let bytes = fs::read(root.join(relative)).unwrap();
+            assert_eq!(png_dimensions(&bytes), (expected_size, expected_size), "{relative}");
+            assert_eq!(fnv1a64(&bytes), expected_hash, "{relative}");
+        }
+
+        let manifest = fs::read_to_string(root.join("AndroidManifest.xml")).unwrap();
+        assert!(manifest.contains("android:icon=\"@mipmap/ic_launcher\""));
+        assert!(manifest.contains("android:roundIcon=\"@mipmap/ic_launcher_round\""));
+
+        let expected_adaptive_mappings = [
+            "<background android:drawable=\"@color/ic_launcher_background\" />",
+            "<foreground android:drawable=\"@mipmap/ic_launcher_foreground\" />",
+        ];
+        for relative in [
+            "res/mipmap-anydpi-v26/ic_launcher.xml",
+            "res/mipmap-anydpi-v26/ic_launcher_round.xml",
+        ] {
+            let adaptive = fs::read_to_string(root.join(relative)).unwrap();
+            assert!(adaptive.contains("<adaptive-icon"), "{relative}");
+            for mapping in expected_adaptive_mappings {
+                assert!(adaptive.contains(mapping), "{relative}: missing {mapping}");
+            }
+        }
+        let colors = fs::read_to_string(root.join("res/values/colors.xml")).unwrap();
+        assert!(colors.contains("<color name=\"ic_launcher_background\">#FF111827</color>"));
+
+        for obsolete_stock_asset in [
+            "res/drawable/ic_launcher_background.xml",
+            "res/drawable-v24/ic_launcher_foreground.xml",
+        ] {
+            assert!(!root.join(obsolete_stock_asset).exists(), "{obsolete_stock_asset}");
+        }
+    }
+
+    #[test]
     fn every_android_config_mutation_is_rejected_and_the_positive_is_restored() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let base = include_str!("../tauri.conf.json");
