@@ -303,6 +303,8 @@ mod tests {
 
     #[test]
     fn generated_android_gradle_keeps_release_invariants() {
+        use sha2::{Digest, Sha256};
+
         let gradle = include_str!("../gen/android/app/build.gradle.kts");
         for required in [
             "fun strictAndroidVersionCode(version: String): Int",
@@ -322,6 +324,19 @@ mod tests {
                 "generated Android Gradle integration lost required invariant: {required}"
             );
         }
+
+        let wrapper_properties =
+            include_str!("../gen/android/gradle/wrapper/gradle-wrapper.properties");
+        assert!(wrapper_properties.contains(
+            "distributionSha256Sum=bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531"
+        ));
+
+        let wrapper_jar = include_bytes!("../gen/android/gradle/wrapper/gradle-wrapper.jar");
+        assert_eq!(
+            format!("{:x}", Sha256::digest(wrapper_jar)),
+            "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172",
+            "generated Android Gradle wrapper JAR must match the official 8.14.3 artifact"
+        );
     }
 
     #[test]
